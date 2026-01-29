@@ -1,0 +1,34 @@
+# Prometheus configuration for VM Orchestrator monitoring
+
+global:
+  scrape_interval: 15s      # Scrape metrics every 15 seconds
+  evaluation_interval: 15s  # Evaluate rules every 15 seconds
+  
+  # Attach these labels to any time series or alerts
+  external_labels:
+    monitor: 'vm-orchestrator'
+    environment: 'production'
+
+# Scrape configuration
+scrape_configs:
+  # VM Orchestrator metrics
+  - job_name: 'vm-orchestrator'
+    static_configs:
+      - targets: ['vm-orchestrator:3003']  # Docker service name
+        labels:
+          service: 'vm-orchestrator'
+    
+    metrics_path: '/metrics'
+    scrape_interval: 5s  # More frequent for real-time VM metrics
+    scrape_timeout: 4s   # Must be less than scrape_interval
+
+# Alerting rules
+rule_files:
+  - "alerting_rules.yml"
+
+# Alertmanager configuration (optional)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#             - 'alertmanager:9093'

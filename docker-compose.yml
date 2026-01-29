@@ -1,0 +1,129 @@
+services:
+  # VM Orchestrator - Runs Firecracker microVMs
+  vm-orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: monosandbox/vm-orchestrator:latest
+    container_name: monosandbox-vm-orchestrator
+    privileged: true
+    devices:
+      - /dev/kvm:/dev/kvm
+    ports:
+      - "3003:3003"
+      # Note: VM file server ports are accessed internally through the orchestrator
+      # Add specific port mappings here if you need direct access to VM services
+    volumes:
+      # Mount code for development (hot reload)
+      - ./vm-orchestrator:/app/vm-orchestrator
+      - ./tsconfig.json:/app/tsconfig.json:ro
+      
+      # CRITICAL: Exclude node_modules from mount (use container's installed deps)
+      - /app/vm-orchestrator/node_modules
+      
+      # Persistent storage for rootfs (contains installed packages, bun, etc.)
+      - firecracker-rootfs:/opt/firecracker/rootfs
+      
+      # Persistent storage for installer cache (uv, volta, etc.)
+      - firecracker-cache:/opt/firecracker/cache
+      
+      # Persistent storage for user projects
+      - firecracker-projects:/opt/firecracker/projects
+    networks:
+      - monosandbox
+    restart: "no"
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+    environment:
+      - NODE_ENV=development
+      - PORT=3003
+      - FIRECRACKER_KERNEL_PATH=/opt/firecracker/kernel/vmlinux-6.12
+      - FIRECRACKER_ROOTFS_PATH=/opt/firecracker/rootfs/ubuntu.ext4
+      - FIRECRACKER_PROJECTS_PATH=/opt/firecracker/projects
+    command:
+      ["bun", "x", "nodemon", "--legacy-watch", "--watch", "/app/vm-orchestrator", "--ext", "ts,js,json", "--exec", "bun index.ts"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Resource Limits - Choose your configuration tier:
+    # Uncomment ONE of the following deploy sections based on your needs
+    
+    # CONSERVATIVE: 10-20 concurrent VMs (Development/Small Teams)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '4'
+    #       memory: 8G
+    #     reservations:
+    #       cpus: '1'
+    #       memory: 2G
+    
+    # MODERATE: 50-100 concurrent VMs (Medium Teams) - RECOMMENDED
+    deploy:
+      resources:
+        limits:
+          cpus: '8'
+          memory: 16G
+        reservations:
+          cpus: '2'
+          memory: 4G
+    
+    # AGGRESSIVE: 200+ concurrent VMs (Large Scale/Production)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '16'
+    #       memory: 32G
+    #     reservations:
+    #       cpus: '4'
+    #       memory: 8G
+
+  # Next.js App - Runs on host (not in Docker)
+  # Run with: bun run dev
+  # This service definition is just for documentation
+
+  # Prometheus - Metrics monitoring (optional but recommended)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: monosandbox-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerting_rules.yml:/etc/prometheus/alerting_rules.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    networks:
+      - monosandbox
+    restart: unless-stopped
+    depends_on:
+      - vm-orchestrator
+
+volumes:
+  firecracker-rootfs:
+    driver: local
+  firecracker-cache:
+    driver: local
+  firecracker-projects:
+    driver: local
+  prometheus-data:
+    driver: local
+
+networks:
+  monosandbox:
+    driver: bridge

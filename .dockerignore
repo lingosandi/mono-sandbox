@@ -1,0 +1,24 @@
+# Docker ignore - keep image size small
+node_modules
+.next
+.git
+.vscode
+*.log
+.env.local
+.env.development
+.env.production
+dist
+build
+coverage
+.turbo
+
+# Keep only VM orchestrator files in Docker image
+src
+public
+prisma/migrations
+scripts
+media-server
+
+# Documentation
+*.md
+LICENSE

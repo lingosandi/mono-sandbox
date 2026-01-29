@@ -1,0 +1,75 @@
+# Prometheus Alerting Rules for VM Orchestrator
+
+groups:
+  - name: vm_orchestrator_alerts
+    interval: 30s
+    rules:
+      # Critical - VM capacity near limit
+      - alert: VMCapacityHigh
+        expr: vm_active_count > 80
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "VM capacity near limit"
+          description: "Active VMs ({{ $value }}) approaching limit. Consider scaling resources."
+
+      # Critical - High VM creation failure rate
+      - alert: VMCreationFailureRate
+        expr: rate(vm_creation_failures_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High VM creation failure rate"
+          description: "VM creation failing at {{ $value }} per second. Check logs and resources."
+
+      # Warning - Memory usage high
+      - alert: MemoryUsageHigh
+        expr: orchestrator_memory_bytes > 14000000000  # 14GB
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "VM orchestrator memory usage high"
+          description: "Memory usage at {{ $value | humanize }}B. Consider increasing limits."
+
+      # Warning - CPU usage high
+      - alert: CPUUsageHigh
+        expr: orchestrator_cpu_usage_percent > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "VM orchestrator CPU usage high"
+          description: "CPU usage at {{ $value }}%. May impact VM performance."
+
+      # Warning - Short VM lifetimes (rapid churn)
+      - alert: VMChurnHigh
+        expr: histogram_quantile(0.5, rate(vm_lifetime_duration_seconds_bucket[5m])) < 60
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High VM churn detected"
+          description: "Median VM lifetime is {{ $value }}s. VMs are being destroyed quickly."
+
+      # Warning - Slow VM creation
+      - alert: VMCreationSlow
+        expr: histogram_quantile(0.95, rate(vm_creation_duration_seconds_bucket[5m])) > 30
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "VM creation taking longer than expected"
+          description: "95th percentile VM creation time is {{ $value }}s. May indicate resource contention."
+
+      # Info - VM orchestrator restarted
+      - alert: VMOrchestratorRestarted
+        expr: orchestrator_uptime_seconds < 300
+        for: 1m
+        labels:
+          severity: info
+        annotations:
+          summary: "VM orchestrator recently restarted"
+          description: "Uptime is only {{ $value }}s. Monitor for issues."

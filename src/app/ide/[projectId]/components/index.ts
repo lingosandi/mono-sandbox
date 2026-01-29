@@ -1,0 +1,6 @@
+export { EditorArea } from "./EditorArea"
+export { EditorTabs } from "./EditorTabs"
+export { FileExplorer } from "./FileExplorer"
+export { FileTree } from "./FileTree"
+export { SectionBar } from "./SectionBar"
+export { Tab } from "./Tab"
