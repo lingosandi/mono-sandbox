@@ -59,8 +59,8 @@ export function useProjectFiles(config: UseProjectFilesConfig) {
 
         setLoading(true)
         try {
-            // Use shallow depth of 1 for fast initial load
-            const response = await fileOps.listFiles("", 1)
+            // Load up to 10 levels deep
+            const response = await fileOps.listFiles("", 10)
             const fileList = Array.isArray(response) ? response : []
             // Use requestIdleCallback to update state during idle time
             if (typeof requestIdleCallback !== "undefined") {

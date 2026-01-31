@@ -100,6 +100,7 @@
 
     body {
         @apply bg-background text-foreground;
+        font-family: "Inter", system-ui, sans-serif;
     }
 }
 
@@ -216,5 +217,73 @@
     }
     body {
         @apply bg-background text-foreground;
+    }
+}
+
+@layer utilities {
+    .hex-background {
+        background-color: #030303;
+        background-image: 
+            radial-gradient(circle at 50% 10%, rgba(60, 60, 70, 0.4) 0%, rgba(3, 3, 3, 1) 100%);
+        background-attachment: fixed;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .ambient-glow {
+        position: fixed;
+        width: 60vw;
+        height: 60vh;
+        border-radius: 100%;
+        background: radial-gradient(circle, rgba(76, 29, 149, 0.15) 0%, rgba(0, 0, 0, 0) 70%);
+        filter: blur(100px);
+        z-index: 1;
+        pointer-events: none;
+        animation: ambient-float 20s infinite alternate ease-in-out;
+    }
+
+    .glass-card {
+        @apply bg-white/[0.03] backdrop-blur-xl border-white/[0.08];
+        box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.2);
+    }
+
+    .spotlight-card {
+        position: relative;
+        overflow: hidden;
+    }
+
+    .spotlight-card::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(600px circle at var(--mouse-x) var(--mouse-y), rgba(255, 255, 255, 0.06), transparent 40%);
+        z-index: 1;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+
+    .spotlight-card:hover::after {
+        opacity: 1;
+    }
+
+    @keyframes ambient-float {
+        0% { transform: translate(-10%, -10%) scale(1); }
+        100% { transform: translate(10%, 10%) scale(1.1); }
+    }
+
+    .card-glow-green {
+        box-shadow: 0 0 30px -10px rgba(34, 197, 94, 0.2);
+    }
+
+    .card-glow-red {
+        box-shadow: 0 0 30px -10px rgba(239, 68, 68, 0.2);
+    }
+
+    /* XTerm Transparency Fixes */
+    .xterm-viewport,
+    .xterm-screen,
+    .xterm-container {
+        background-color: transparent !important;
     }
 }

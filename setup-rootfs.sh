@@ -183,7 +183,7 @@ if ! chroot "$MOUNT_DIR" /bin/bash -c 'export DEBIAN_FRONTEND=noninteractive; ex
 fi
 
 echo "  → Installing curl, Git, vim, nano, build tools, udev, unzip, and SSL certificates..."
-if ! chroot "$MOUNT_DIR" /bin/bash -c 'export DEBIAN_FRONTEND=noninteractive; export TZ=Etc/UTC; apt-get -o Acquire::Retries=3 -f install -y && apt-get -o Acquire::Retries=3 install -y --no-install-recommends --fix-missing curl git vim nano build-essential socat ca-certificates udev unzip iputils-ping lsof iproute2 dnsutils telnet netcat-openbsd traceroute mtr-tiny'; then
+if ! chroot "$MOUNT_DIR" /bin/bash -c 'export DEBIAN_FRONTEND=noninteractive; export TZ=Etc/UTC; apt-get -o Acquire::Retries=3 -f install -y && apt-get -o Acquire::Retries=3 install -y --no-install-recommends --fix-missing curl git vim nano build-essential socat ca-certificates udev unzip iputils-ping lsof iproute2 dnsutils telnet netcat-openbsd traceroute mtr-tiny screen'; then
     echo "  ✗ Failed to install packages"
     umount "$MOUNT_DIR/dev/pts" 2>/dev/null || true
     umount "$MOUNT_DIR/dev" 2>/dev/null || true

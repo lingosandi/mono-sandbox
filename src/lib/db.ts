@@ -77,22 +77,31 @@ export const projectDb = {
     },
 
     create(data: {
+        id?: string
         name: string
         description?: string | null
     }) {
-        const id = createId()
+        const id = data.id || createId()
         const now = Date.now()
 
-        db.prepare(`
-            INSERT INTO projects (id, name, description, created_at, updated_at, deleted_at)
-            VALUES (?, ?, ?, ?, ?, NULL)
-        `).run(
-            id,
-            data.name,
-            data.description || null,
-            now,
-            now
-        )
+        try {
+            db.prepare(`
+                INSERT INTO projects (id, name, description, created_at, updated_at, deleted_at)
+                VALUES (?, ?, ?, ?, ?, NULL)
+            `).run(
+                id,
+                data.name,
+                data.description || null,
+                now,
+                now
+            )
+        } catch (error) {
+            // Check if it's a duplicate key error
+            if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) {
+                throw new Error(`Project with ID ${id} already exists`)
+            }
+            throw error
+        }
 
         return this.findUnique({ id })
     },

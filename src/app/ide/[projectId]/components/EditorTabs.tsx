@@ -16,14 +16,14 @@ export function EditorTabs({
     onCloseFile
 }: EditorTabsProps) {
     return (
-        <div className="h-10 border-b border-white/5 flex items-center justify-between px-4 bg-[#09090b]">
+        <div className="h-10 border-b border-white/5 flex items-center justify-between px-4 bg-transparent">
             <div className="flex items-center gap-1 overflow-x-auto no-scrollbar mask-gradient-r flex-1 mr-4">
-                {/* Non-removable Agent Tab */}
+                {/* Non-removable terminal Tab */}
                 <Tab
-                    label="Agent"
+                    label="Terminal"
                     icon={TerminalIcon}
-                    isActive={activeFile === "agent"}
-                    onClick={() => onSetActiveFile("agent")}
+                    isActive={activeFile === "terminal"}
+                    onClick={() => onSetActiveFile("terminal")}
                 />
 
                 {openFiles.map((file) => (

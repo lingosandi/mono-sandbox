@@ -35,7 +35,7 @@ export function Terminal({ projectId, resizeTrigger }: TerminalProps) {
                     "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace",
                 lineHeight: 1.4,
                 theme: {
-                    background: "#0c0c0e",
+                    background: "rgba(0,0,0,0)",
                     foreground: "#d4d4d8",
                     cursor: "#d4d4d8",
                     black: "#18181b",

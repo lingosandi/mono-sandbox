@@ -29,7 +29,10 @@ async function handleRequest(
         // Proxy request to vm-orchestrator
         const response = await fetch(
             `${VM_ORCHESTRATOR_URL}/api/overlay/download/${projectId}`,
-            { method: isHead ? "HEAD" : "GET" }
+            { 
+                method: isHead ? "HEAD" : "GET",
+                signal: AbortSignal.timeout(300000) // 5 minute timeout
+            }
         )
 
         if (!response.ok) {
@@ -47,10 +50,10 @@ async function handleRequest(
 
         // Stream the file from vm-orchestrator to client
         const headers = new Headers()
-        headers.set("Content-Type", "application/octet-stream")
+        headers.set("Content-Type", "application/gzip")
         headers.set(
             "Content-Disposition",
-            `attachment; filename="${projectId}-overlay.ext4"`
+            `attachment; filename="${projectId}-overlay.ext4.tar.gz"`
         )
         
         const contentLength = response.headers.get("Content-Length")
@@ -58,9 +61,26 @@ async function handleRequest(
             headers.set("Content-Length", contentLength)
         }
 
+        // Ensure response body exists (shouldn't be null for successful response, but type safety)
+        if (!response.body) {
+            return NextResponse.json(
+                { error: "Empty response from vm-orchestrator" },
+                { status: 500 }
+            )
+        }
+
         return new NextResponse(response.body, { headers })
     } catch (error) {
         console.error("Error downloading overlay:", error)
+        
+        // Provide specific error message for timeout
+        if (error && typeof error === 'object' && 'name' in error && error.name === 'TimeoutError') {
+            return NextResponse.json(
+                { error: "Download timed out. Please try again." },
+                { status: 408 }
+            )
+        }
+        
         return NextResponse.json(
             { error: "Failed to download overlay disk" },
             { status: 500 }

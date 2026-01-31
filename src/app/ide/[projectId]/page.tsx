@@ -39,10 +39,10 @@ export default function IDEProjectPage() {
     // Keyboard shortcuts
     useKeyboardShortcuts(activeFile, saveFile)
 
-    // Default to agent tab when no files are open
+    // Default to terminal tab when no files are open
     useEffect(() => {
-        if (openFiles.length === 0 && activeFile !== "agent") {
-            setActiveFile("agent")
+        if (openFiles.length === 0 && activeFile !== "terminal") {
+            setActiveFile("terminal")
         }
     }, [openFiles.length, activeFile, setActiveFile])
 
@@ -121,7 +121,7 @@ export default function IDEProjectPage() {
     const activeFileContent = openFiles.find((f) => f.path === activeFile)
 
     return (
-        <div className="flex h-screen bg-[#09090b] text-zinc-100 overflow-hidden font-sans selection:bg-blue-500/20">
+        <div className="flex h-screen hex-background text-zinc-100 overflow-hidden font-sans selection:bg-blue-500/20">
             <FileExplorer
                 files={files}
                 loading={loading}

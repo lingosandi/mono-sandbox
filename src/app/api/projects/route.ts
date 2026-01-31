@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ projects })
 }
 
-// POST /api/projects - Create new project
+// POST /api/projects - Create new sandbox
 export async function POST(request: NextRequest) {
     const body = await request.json()
     const { name, description } = body
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ project }, { status: 201 })
 }
 
-// DELETE /api/projects - Delete project
+// DELETE /api/projects - Delete sandbox
 export async function DELETE(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const projectId = searchParams.get("id")
@@ -74,10 +74,10 @@ export async function DELETE(request: NextRequest) {
         try {
             await fs.rm(projectDir, { recursive: true, force: true })
         } catch (error) {
-            console.warn("Failed to delete project directory:", error)
+            console.warn("Failed to delete sandbox directory:", error)
         }
 
-        // 2. Delete project overlay disk via vm-orchestrator API
+        // 2. Delete sandbox overlay disk via vm-orchestrator API
         try {
             const response = await fetch(
                 "http://localhost:3003/api/project-overlay",

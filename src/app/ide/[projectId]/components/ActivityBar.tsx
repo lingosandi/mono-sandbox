@@ -24,7 +24,7 @@ export function ActivityBar({
     onCloseProject
 }: ActivityBarProps) {
     return (
-        <div className="w-14 flex flex-col items-center py-4 border-r border-white/5 bg-[#0c0c0e] shrink-0 z-20">
+        <div className="w-14 flex flex-col items-center py-4 border-r border-white/5 bg-transparent shrink-0 z-20">
             <div className="flex flex-col gap-4 w-full px-2">
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>

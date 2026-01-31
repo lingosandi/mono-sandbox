@@ -38,8 +38,8 @@ export function EditorArea({
 }: EditorAreaProps) {
     return (
         <div
-            className="flex-1 flex flex-col bg-[#09090b]"
-            style={{ minWidth: `${TERMINAL_MIN_WIDTH}px` }}
+            className="flex-1 flex flex-col"
+            style={{ minWidth: `${TERMINAL_MIN_WIDTH}px`, backgroundColor: "#0f0f11" }}
         >
             <EditorTabs
                 openFiles={openFiles}
@@ -49,10 +49,13 @@ export function EditorArea({
             />
 
             {/* Editor Content */}
-            <div className="flex-1 relative">
-                {activeFile === "agent" ? (
+            <div className="flex-1 relative bg-black/20">
+                {/* Keep terminal mounted but hidden when not active */}
+                <div className={activeFile === "terminal" ? "h-full" : "hidden"}>
                     <Terminal projectId={projectId} />
-                ) : activeFileContent ? (
+                </div>
+                
+                {activeFile !== "terminal" && activeFileContent ? (
                     <MonacoEditor
                         height="100%"
                         theme="vs-dark"
@@ -62,7 +65,6 @@ export function EditorArea({
                             onUpdateContent(activeFile!, value || "")
                         }
                         options={{
-                            minimap: { enabled: false },
                             wordWrap: "on"
                         }}
                         beforeMount={(monaco) => {
@@ -71,7 +73,7 @@ export function EditorArea({
                                 inherit: true,
                                 rules: [],
                                 colors: {
-                                    "editor.background": "#0f0f11"
+                                    "editor.background": "#0c0c0e"
                                 }
                             })
                         }}
@@ -80,14 +82,14 @@ export function EditorArea({
                         }}
                         className="pt-2"
                     />
-                ) : (
+                ) : activeFile !== "terminal" && !activeFileContent ? (
                     <div className="h-full flex flex-col items-center justify-center text-zinc-500 gap-4">
                         <div className="h-16 w-16 rounded-2xl bg-white/5 flex items-center justify-center">
                             <FileCode2 className="h-8 w-8 opacity-50" />
                         </div>
                         <p>Select a file to start editing</p>
                     </div>
-                )}
+                ) : null}
             </div>
         </div>
     )

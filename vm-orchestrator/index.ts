@@ -1,6 +1,8 @@
 import { createServer, ServerResponse } from "http"
 import { mkdir } from "fs/promises"
 import fs from "fs"
+import { exec } from "child_process"
+import { promisify } from "util"
 import { createSessionManager } from "./session-manager"
 import { createVMOrchestrator } from "./vm-orchestrator"
 import { createWebSocketServer } from "./websocket-server"
@@ -11,8 +13,12 @@ import { getHostPortForVM, startPortForward } from "./port-forward"
 import { deleteOverlayDisk } from "./overlay-disk"
 import path from "path"
 import net from "net"
+import crypto from "crypto"
 import { Duplex } from "stream"
+import { spawn } from "child_process"
 import { metrics, metricsRegistry, updateResourceMetrics } from "./metrics"
+
+const execAsync = promisify(exec)
 
 // Hoisted validation helper
 function validateIdentifier(id: string, fieldName: string): void {
@@ -231,14 +237,10 @@ async function main() {
                     return
                 }
 
-                // Get file stats
-                const stats = fs.statSync(overlayPath)
-
-                // Set headers
+                // Set headers for tar.gz download (preserves sparse file)
                 res.writeHead(200, {
-                    "Content-Type": "application/octet-stream",
-                    "Content-Disposition": `attachment; filename="${projectId}-overlay.ext4"`,
-                    "Content-Length": stats.size.toString()
+                    "Content-Type": "application/gzip",
+                    "Content-Disposition": `attachment; filename="${projectId}-overlay.ext4.tar.gz"`
                 })
 
                 // For HEAD requests, don't send body
@@ -247,15 +249,53 @@ async function main() {
                     return
                 }
 
-                // Stream file for GET
-                const stream = fs.createReadStream(overlayPath)
-                stream.pipe(res)
+                // Stream file with tar --sparse and gzip compression
+                // tar --sparse preserves sparse file holes, gzip compresses efficiently
+                // This keeps download small (~69MB) and preserves sparse characteristics
+                const tarProcess = spawn("tar", [
+                    "--sparse",           // Preserve sparse file holes
+                    "-czf",               // Create, gzip compress, to file (stdout)
+                    "-",                  // Output to stdout
+                    "-C",                 // Change to directory
+                    FIRECRACKER_PROJECTS_DIR,
+                    `${projectId}-overlay.ext4`  // File to archive
+                ])
 
-                stream.on("error", (error) => {
-                    console.error("[OverlayDownload] Stream error:", error)
+                tarProcess.stdout.pipe(res)
+                
+                // Kill tar process if client disconnects
+                res.on("close", () => {
+                    if (!tarProcess.killed) {
+                        console.log("[OverlayDownload] Client disconnected, killing tar process")
+                        tarProcess.kill("SIGTERM")
+                    }
+                })
+
+                // Handle errors from tar process
+                tarProcess.on("error", (error: Error) => {
+                    console.error("[OverlayDownload] Tar process error:", error)
                     if (!res.headersSent) {
                         res.writeHead(500, { "Content-Type": "application/json" })
-                        res.end(JSON.stringify({ error: "Failed to stream file" }))
+                        res.end(JSON.stringify({ error: "Failed to create archive" }))
+                    }
+                    // Ensure process is killed
+                    if (!tarProcess.killed) {
+                        tarProcess.kill("SIGKILL")
+                    }
+                })
+
+                tarProcess.stderr.on("data", (data: Buffer) => {
+                    console.error(`[OverlayDownload] Tar stderr: ${data}`)
+                })
+
+                tarProcess.on("close", (code: number | null) => {
+                    if (code !== 0 && code !== null) {
+                        console.error(`[OverlayDownload] Tar process exited with code ${code}`)
+                        // Only send error if headers not sent (may have already streamed partial data)
+                        if (!res.headersSent) {
+                            res.writeHead(500, { "Content-Type": "application/json" })
+                            res.end(JSON.stringify({ error: "Tar process failed" }))
+                        }
                     }
                 })
             } catch (error) {
@@ -271,6 +311,344 @@ async function main() {
                         })
                     )
                 }
+            }
+        } else if (req.method === "POST" && req.url === "/api/overlay/upload") {
+            // Upload and extract overlay disk
+            let tempFilePath = ""
+            let extractDir = ""
+            let projectId = ""
+            let targetPath = ""
+            
+            try {
+                // Convert Node.js IncomingMessage to Web Request for Bun's formData() API
+                const chunks: Buffer[] = []
+                let totalSize = 0
+                const MAX_REQUEST_SIZE = 11 * 1024 * 1024 * 1024 // 11GB (slightly larger than max file size)
+                
+                for await (const chunk of req) {
+                    totalSize += chunk.length
+                    if (totalSize > MAX_REQUEST_SIZE) {
+                        res.writeHead(413, { "Content-Type": "application/json" })
+                        res.end(JSON.stringify({ error: "Request body too large" }))
+                        return
+                    }
+                    chunks.push(chunk)
+                }
+                const bodyBuffer = Buffer.concat(chunks)
+                
+                const request = new Request(`http://localhost:${VM_ORCHESTRATOR_PORT}/api/overlay/upload`, {
+                    method: "POST",
+                    headers: req.headers as HeadersInit,
+                    body: bodyBuffer
+                })
+                
+                const formData = await request.formData()
+                const file = formData.get("file") as File
+                
+                if (!file) {
+                    res.writeHead(400, { "Content-Type": "application/json" })
+                    res.end(JSON.stringify({ error: "No file provided" }))
+                    return
+                }
+                
+                // Validate file extension
+                if (!file.name.endsWith(".tar.gz") && !file.name.endsWith(".tgz")) {
+                    res.writeHead(400, { "Content-Type": "application/json" })
+                    res.end(JSON.stringify({ error: "Invalid file type. Expected .tar.gz or .tgz" }))
+                    return
+                }
+                
+                // Validate file size (max 10GB - slightly larger than max 5GB overlay)
+                const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024
+                if (file.size > MAX_FILE_SIZE) {
+                    res.writeHead(400, { "Content-Type": "application/json" })
+                    res.end(JSON.stringify({ error: `File too large. Maximum size is ${MAX_FILE_SIZE / (1024 * 1024 * 1024)}GB` }))
+                    return
+                }
+                
+                // Check available disk space before proceeding
+                try {
+                    const { stdout } = await execAsync(`df -B1 ${FIRECRACKER_PROJECTS_DIR} | tail -1 | awk '{print $4}'`)
+                    const availableSpace = parseInt(stdout.trim(), 10)
+                    const requiredSpace = Math.max(file.size * 2, 15 * 1024 * 1024 * 1024) // 2x file size or 15GB minimum
+                    
+                    if (availableSpace < requiredSpace) {
+                        res.writeHead(507, { "Content-Type": "application/json" })
+                        res.end(JSON.stringify({ 
+                            error: `Insufficient disk space. Required: ${(requiredSpace / (1024 * 1024 * 1024)).toFixed(2)}GB, Available: ${(availableSpace / (1024 * 1024 * 1024)).toFixed(2)}GB` 
+                        }))
+                        return
+                    }
+                } catch (error) {
+                    console.warn("[OverlayUpload] Could not check disk space:", error)
+                    // Continue anyway - don't block uploads if df command fails
+                }
+                
+                // Generate new project ID
+                projectId = crypto.randomUUID()
+                
+                if (!projectId) {
+                    throw new Error("Failed to generate project ID")
+                }
+                
+                // Validate projectId
+                validateIdentifier(projectId, "projectId")
+                
+                // Set targetPath early for race condition check
+                targetPath = path.join(FIRECRACKER_PROJECTS_DIR, `${projectId}-overlay.ext4`)
+                
+                // Race condition protection: check if target already exists
+                // UUID collision is nearly impossible, but check for .uploading temp file too
+                if (fs.existsSync(targetPath) || fs.existsSync(`${targetPath}.uploading`)) {
+                    console.error(`[OverlayUpload] Collision detected for projectId ${projectId}`)
+                    res.writeHead(409, { "Content-Type": "application/json" })
+                    res.end(JSON.stringify({ error: "Project ID collision. Please retry." }))
+                    return
+                }
+                
+                // Write uploaded file to temp location
+                // NOTE: arrayBuffer() loads entire file into memory - acceptable for single-user system
+                // For production, use streaming multipart parser
+                tempFilePath = path.join("/tmp", `${projectId}-upload.tar.gz`)
+                const fileArrayBuffer = await file.arrayBuffer()
+                const fileBuffer = Buffer.from(fileArrayBuffer)
+                fs.writeFileSync(tempFilePath, fileBuffer)
+                
+                // Create unique temp directory for this upload
+                extractDir = path.join("/tmp", `upload-${projectId}`)
+                fs.mkdirSync(extractDir, { recursive: true })
+                
+                // Extract tar.gz file to unique temp directory
+                const extractProcess = spawn("tar", [
+                    "--sparse",           // Preserve sparse file holes
+                    "-xzf",               // Extract, decompress gzip, from file
+                    tempFilePath,         // Input archive
+                    "-C",                 // Change to directory
+                    extractDir
+                ])
+                
+                let extractError = ""
+                extractProcess.stderr.on("data", (data: Buffer) => {
+                    extractError += data.toString()
+                })
+                
+                await new Promise<void>((resolve, reject) => {
+                    extractProcess.on("close", (code: number | null) => {
+                        if (code !== 0) {
+                            reject(new Error(`Extraction failed: ${extractError || `exit code ${code}`}`))
+                        } else {
+                            resolve()
+                        }
+                    })
+                    
+                    extractProcess.on("error", (error: Error) => {
+                        reject(error)
+                    })
+                })
+                
+                // Find the extracted file in our temp directory
+                const extractedFiles = fs.readdirSync(extractDir).filter(f => f.endsWith("-overlay.ext4"))
+                
+                console.log(`[OverlayUpload] Extracted files in ${extractDir}: ${extractedFiles.join(", ")}`)
+                
+                if (extractedFiles.length === 0) {
+                    throw new Error("No overlay file found in extracted archive")
+                }
+                
+                if (extractedFiles.length > 1) {
+                    throw new Error("Archive contains multiple overlay files. Expected single overlay disk.")
+                }
+                
+                // Security: Validate filename doesn't contain path traversal
+                const extractedFilename = extractedFiles[0]
+                if (extractedFilename.includes("..") || extractedFilename.includes("/") || extractedFilename.includes("\\")) {
+                    throw new Error("Invalid filename in archive: path traversal detected")
+                }
+                
+                // Security: Ensure path is within extractDir (canonical path check)
+                const extractedPath = path.join(extractDir, extractedFilename)
+                const canonicalExtractedPath = fs.realpathSync(extractedPath)
+                const canonicalExtractDir = fs.realpathSync(extractDir)
+                // Ensure comparison uses path separator at end to prevent false positives
+                const normalizedExtractDir = canonicalExtractDir.endsWith(path.sep) 
+                    ? canonicalExtractDir 
+                    : canonicalExtractDir + path.sep
+                if (!canonicalExtractedPath.startsWith(normalizedExtractDir)) {
+                    throw new Error("Security violation: extracted file outside temp directory")
+                }
+                
+                // Verify extracted file exists and has non-zero size
+                const extractedStats = fs.statSync(extractedPath)
+                if (!extractedStats.isFile()) {
+                    throw new Error("Extracted path is not a file")
+                }
+                if (extractedStats.size === 0) {
+                    throw new Error("Extracted file is empty (0 bytes)")
+                }
+                
+                console.log(`[OverlayUpload] Copying ${extractedPath} (${extractedStats.size} bytes) to ${targetPath}`)
+                
+                // Use atomic operation: copy to temp then rename
+                // This prevents corruption if process is killed mid-copy
+                const tempTargetPath = `${targetPath}.uploading`
+                
+                try {
+                    // Copy preserving sparse holes (can't rename across filesystems)
+                    await execAsync(`cp --sparse=always "${extractedPath}" "${tempTargetPath}"`)
+                    
+                    // Sync filesystem to ensure copy completed
+                    await execAsync("sync")
+                    
+                    // Verify copied file size matches before atomic rename
+                    const tempStats = fs.statSync(tempTargetPath)
+                    if (tempStats.size !== extractedStats.size) {
+                        throw new Error(`Copy size mismatch: expected ${extractedStats.size}, got ${tempStats.size}`)
+                    }
+                    
+                    // Atomic rename - this is the commit point
+                    try {
+                        fs.renameSync(tempTargetPath, targetPath)
+                    } catch {
+                        // If rename fails (e.g., across filesystems), use mv command
+                        await execAsync(`mv "${tempTargetPath}" "${targetPath}"`)
+                    }
+                } catch (copyError) {
+                    // Clean up temp target if copy failed
+                    if (fs.existsSync(tempTargetPath)) {
+                        fs.unlinkSync(tempTargetPath)
+                    }
+                    throw copyError
+                }
+                
+                // Clean up temp directory
+                fs.rmSync(extractDir, { recursive: true, force: true })
+                
+                // Verify extracted file exists and is ext4
+                if (!fs.existsSync(targetPath)) {
+                    throw new Error("Extracted file not found after copy")
+                }
+                
+                // Verify copied file has correct size
+                const copiedStats = fs.statSync(targetPath)
+                if (copiedStats.size === 0) {
+                    throw new Error("Copied file is empty (0 bytes)")
+                }
+                if (copiedStats.size !== extractedStats.size) {
+                    throw new Error(`Final verification failed: size mismatch ${copiedStats.size} vs ${extractedStats.size}`)
+                }
+                
+                // Basic ext4 signature check (first 2 bytes at offset 0x438 should be 0x53EF)
+                let fd = -1
+                try {
+                    fd = fs.openSync(targetPath, "r")
+                    const buffer = Buffer.alloc(2)
+                    fs.readSync(fd, buffer, 0, 2, 0x438)
+                    
+                    const signature = buffer.readUInt16LE(0)
+                    if (signature !== 0xEF53) {
+                        // Clean up invalid file and temp file
+                        fs.unlinkSync(targetPath)
+                        fs.unlinkSync(tempFilePath)
+                        throw new Error("Invalid ext4 filesystem")
+                    }
+                } finally {
+                    if (fd >= 0) {
+                        fs.closeSync(fd)
+                    }
+                }
+                
+                // Clean up temp file
+                fs.unlinkSync(tempFilePath)
+                
+                res.writeHead(200, { "Content-Type": "application/json" })
+                res.end(JSON.stringify({ projectId }))
+            } catch (error) {
+                console.error("[OverlayUpload] Error:", error)
+                
+                // Clean up temp files on error
+                try {
+                    if (tempFilePath && fs.existsSync(tempFilePath)) {
+                        fs.unlinkSync(tempFilePath)
+                    }
+                    if (extractDir && fs.existsSync(extractDir)) {
+                        fs.rmSync(extractDir, { recursive: true, force: true })
+                    }
+                    // Clean up partial target file if it exists
+                    if (targetPath) {
+                        if (fs.existsSync(targetPath)) {
+                            fs.unlinkSync(targetPath)
+                        }
+                        // Also clean up .uploading temp file
+                        if (fs.existsSync(`${targetPath}.uploading`)) {
+                            fs.unlinkSync(`${targetPath}.uploading`)
+                        }
+                    }
+                } catch (cleanupError) {
+                    // Only log if it's not a "file not found" error
+                    if (cleanupError instanceof Error && !cleanupError.message.includes('ENOENT')) {
+                        console.error("[OverlayUpload] Cleanup error:", cleanupError)
+                    }
+                }
+                
+                res.writeHead(500, { "Content-Type": "application/json" })
+                res.end(
+                    JSON.stringify({
+                        error:
+                            error instanceof Error
+                                ? error.message
+                                : "Failed to upload overlay"
+                    })
+                )
+            }
+        } else if (req.method === "DELETE" && req.url?.startsWith("/api/overlay/delete/")) {
+            // DELETE /api/overlay/delete/{projectId} - Delete orphaned overlay disk
+            try {
+                const projectId = req.url.split("/api/overlay/delete/")[1]
+                
+                if (!projectId) {
+                    res.writeHead(400, { "Content-Type": "application/json" })
+                    res.end(JSON.stringify({ error: "Project ID required" }))
+                    return
+                }
+                
+                validateIdentifier(projectId, "projectId")
+                
+                const overlayPath = path.join(
+                    FIRECRACKER_PROJECTS_DIR,
+                    `${projectId}-overlay.ext4`
+                )
+                
+                if (!fs.existsSync(overlayPath)) {
+                    res.writeHead(404, { "Content-Type": "application/json" })
+                    res.end(JSON.stringify({ error: "Overlay disk not found" }))
+                    return
+                }
+                
+                // Check if VM is running with this overlay (don't delete if in use)
+                const session = sessionManager.getSessionByProject(projectId)
+                if (session) {
+                    res.writeHead(409, { "Content-Type": "application/json" })
+                    res.end(JSON.stringify({ error: "Cannot delete disk: VM is running" }))
+                    return
+                }
+                
+                // Delete the overlay file
+                fs.unlinkSync(overlayPath)
+                console.log(`[OverlayDelete] Deleted orphaned disk: ${overlayPath}`)
+                
+                res.writeHead(200, { "Content-Type": "application/json" })
+                res.end(JSON.stringify({ success: true }))
+            } catch (error) {
+                console.error("[OverlayDelete] Error:", error)
+                res.writeHead(500, { "Content-Type": "application/json" })
+                res.end(
+                    JSON.stringify({
+                        error:
+                            error instanceof Error
+                                ? error.message
+                                : "Failed to delete overlay"
+                    })
+                )
             }
         } else if (req.method === "POST" && req.url === "/api/vm/start") {
             // Start VM for a project
@@ -518,7 +896,7 @@ To check mount status:
                 }
             })
         } else if (req.method === "DELETE" && req.url === "/api/project-overlay") {
-            // Delete project overlay disk (persistent OverlayFS + project files)
+            // Delete sandbox overlay disk (persistent OverlayFS + project files)
             let body = ""
             req.on("data", (chunk) => {
                 body += chunk.toString()
@@ -568,7 +946,7 @@ To check mount status:
                         console.log(`[DeleteDisk] Waited for resource release`)
                     }
 
-                    // Delete project overlay disk (contains OverlayFS changes + project files)
+                    // Delete sandbox overlay disk (contains OverlayFS changes + project files)
                     try {
                         await deleteOverlayDisk(projectId)
                         deletedFiles.push(`${projectId}-overlay.ext4`)

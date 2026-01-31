@@ -59,7 +59,7 @@ export function FileExplorer({
     clipboardItem
 }: FileExplorerProps) {
     return (
-        <div className="w-64 border-r border-white/5 bg-[#09090b] flex flex-col shrink-0">
+        <div className="w-64 border-r border-white/5 bg-transparent flex flex-col shrink-0">
             <SectionBar
                 title="Explorer"
                 actions={
