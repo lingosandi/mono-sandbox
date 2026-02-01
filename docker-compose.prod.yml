@@ -21,7 +21,8 @@ services:
       - /dev/kvm:/dev/kvm
     ports:
       - "3003:3003"
-      - "10000-60000:10000-60000"
+      # Port range for WebRTC - may conflict on Windows with reserved ports
+      # Uncomment if needed: - "20000-40000:20000-40000"
     volumes:
       - firecracker-rootfs:/opt/firecracker/rootfs
       - firecracker-cache:/opt/firecracker/cache
@@ -29,9 +30,17 @@ services:
       - ./projects:/sandboxes
     environment:
       - NODE_ENV=production
+      - VERBOSE=true
+      - DEBUG=*
     networks:
       - monosandbox
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
 
   prometheus:
     image: prom/prometheus:latest

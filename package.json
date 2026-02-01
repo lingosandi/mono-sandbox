@@ -5,7 +5,6 @@
     "scripts": {
         "dev": "next dev",
         "dev:vm": "docker compose up vm-orchestrator",
-        "build:vm": "docker compose build vm-orchestrator",
         "docker-shell": "docker compose exec vm-orchestrator bash",
         "reload-vsock": "docker compose exec vm-orchestrator bash /app/setup-vsock-binaries.sh && docker compose restart vm-orchestrator",
         "reload-fileserver": "docker compose exec vm-orchestrator bash /app/setup-fileserver-js.sh && docker compose restart vm-orchestrator",
@@ -15,7 +14,6 @@
         "build": "next build",
         "start": "next start",
         "lint": "eslint",
-        "create-admin": "bun scripts/create-admin.ts",
         "clear-cache": "rm -rf .next",
         "postinstall": "rm -rf .next"
     },
