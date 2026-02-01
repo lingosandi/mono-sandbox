@@ -15,20 +15,25 @@ Full-stack sandbox environment with Next.js IDE and Firecracker microVMs.
 bun install
 ```
 
-### 2. Start Backend (VM Orchestrator)
+### 2. Setup Container (First Time Only)
 
 ```bash
-docker pull ghcr.io/lingosandi/mono-sandbox:latest
-docker compose -f docker-compose.prod.yml up -d
+bun setup-container
 ```
 
-### 3. Start Frontend (Next.js)
+### 3. Start Container (VM Orchestrator)
+
+```bash
+bun start-container
+```
+
+### 4. Start Frontend (Next.js)
 
 ```bash
 bun build
 bun start
 ```
 
-### 4. Access
+### 5. Access
 
 - **IDE**: http://localhost:3002

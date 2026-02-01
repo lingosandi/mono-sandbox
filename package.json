@@ -5,6 +5,8 @@
     "scripts": {
         "dev": "next dev -p 3002",
         "dev:vm": "docker compose up vm-orchestrator",
+        "setup-container": "docker pull ghcr.io/lingosandi/mono-sandbox:latest",
+        "start-container": "docker compose -f docker-compose.prod.yml up -d",
         "docker-shell": "docker compose exec vm-orchestrator bash",
         "reload-vsock": "docker compose exec vm-orchestrator bash /app/setup-vsock-binaries.sh && docker compose restart vm-orchestrator",
         "reload-fileserver": "docker compose exec vm-orchestrator bash /app/setup-fileserver-js.sh && docker compose restart vm-orchestrator",
