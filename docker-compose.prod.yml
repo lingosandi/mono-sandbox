@@ -30,8 +30,6 @@ services:
       - ./projects:/sandboxes
     environment:
       - NODE_ENV=production
-      - VERBOSE=true
-      - DEBUG=*
     networks:
       - monosandbox
     restart: unless-stopped

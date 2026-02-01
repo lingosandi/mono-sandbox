@@ -36,4 +36,4 @@ bun start
 
 ### 5. Access
 
-- **IDE**: http://localhost:3000
+- **IDE**: http://localhost:3002

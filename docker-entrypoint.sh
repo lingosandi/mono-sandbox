@@ -184,6 +184,23 @@ else
     echo "✓ Rootfs already exists: $(ls -lh /opt/firecracker/rootfs/ubuntu.ext4)"
 fi
 
+# Check if initramfs exists - if not, create it from existing rootfs
+INITRAMFS_PATH="/opt/firecracker/rootfs/initramfs.img"
+if [ ! -f "$INITRAMFS_PATH" ]; then
+    echo ""
+    echo "=========================================="
+    echo "Creating initramfs (missing from pre-built rootfs)"
+    echo "=========================================="
+    echo ""
+    if ! bash /app/setup-initramfs.sh /opt/firecracker/rootfs/ubuntu.ext4; then
+        echo "ERROR: setup-initramfs.sh failed"
+        exit 1
+    fi
+    echo "✓ Initramfs created: $(ls -lh $INITRAMFS_PATH)"
+else
+    echo "✓ Initramfs already exists: $(ls -lh $INITRAMFS_PATH)"
+fi
+
 # Verify Firecracker is installed and working
 if ! command -v firecracker &> /dev/null; then
     echo "ERROR: Firecracker not found in PATH"

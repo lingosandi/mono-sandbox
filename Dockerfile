@@ -157,7 +157,6 @@ RUN mkdir -p /opt/firecracker/rootfs
 # Download pre-built rootfs artifact (optional, speeds up first startup)
 # To build artifact: bash scripts/build-rootfs-artifact.sh
 # Then upload to GitHub releases and set ROOTFS_ARTIFACT_URL build arg
-# Example: docker build --build-arg ROOTFS_ARTIFACT_URL=https://github.com/user/repo/releases/download/v1.0.0/ubuntu-rootfs-v1.0.0.ext4.zst .
 ARG ROOTFS_ARTIFACT_URL=""
 RUN if [ -n "$ROOTFS_ARTIFACT_URL" ]; then \
         echo "==========================================="; \

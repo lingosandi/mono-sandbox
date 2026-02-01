@@ -142,9 +142,7 @@ echo ""
 
 # Step 5: Compress rootfs
 echo "[5/6] Compressing rootfs with zstd (high compression)..."
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-VERSION="v1.0.0"
-OUTPUT_FILE="$OUTPUT_DIR/ubuntu-rootfs-${VERSION}-${TIMESTAMP}.ext4.zst"
+OUTPUT_FILE="$OUTPUT_DIR/ubuntu-rootfs.ext4.zst"
 
 
 # Check if zstd is installed
