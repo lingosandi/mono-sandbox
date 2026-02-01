@@ -154,7 +154,32 @@ RUN find . -maxdepth 1 -name "*.sh" -type f -exec sed -i 's/\r$//' {} \; \
 # Create rootfs directory structure
 RUN mkdir -p /opt/firecracker/rootfs
 
-# Note: Rootfs creation and customization happens at container startup (docker-entrypoint.sh)
+# Download pre-built rootfs artifact (optional, speeds up first startup)
+# To build artifact: bash scripts/build-rootfs-artifact.sh
+# Then upload to GitHub releases and set ROOTFS_ARTIFACT_URL build arg
+# Example: docker build --build-arg ROOTFS_ARTIFACT_URL=https://github.com/user/repo/releases/download/v1.0.0/ubuntu-rootfs-v1.0.0.ext4.zst .
+ARG ROOTFS_ARTIFACT_URL=""
+RUN if [ -n "$ROOTFS_ARTIFACT_URL" ]; then \
+        echo "==========================================="; \
+        echo "Downloading pre-built rootfs artifact..."; \
+        echo "URL: $ROOTFS_ARTIFACT_URL"; \
+        echo "==========================================="; \
+        cd /opt/firecracker/rootfs && \
+        wget --verbose --show-progress --progress=bar:force --timeout=300 --tries=3 "$ROOTFS_ARTIFACT_URL" -O ubuntu.ext4.zst && \
+        echo ""; \
+        echo "==========================================="; \
+        echo "Extracting rootfs (this may take 2-3 minutes)..."; \
+        echo "==========================================="; \
+        zstd -d -v ubuntu.ext4.zst -o ubuntu.ext4 && \
+        rm ubuntu.ext4.zst && \
+        echo ""; \
+        echo "✓ Pre-built rootfs installed: $(ls -lh ubuntu.ext4 | awk '{print $5}')"; \
+    else \
+        echo "ℹ No ROOTFS_ARTIFACT_URL provided"; \
+        echo "Rootfs will be built on first container startup (~5-10 minutes)"; \
+    fi
+
+# Note: If no pre-built rootfs is provided, creation happens at container startup (docker-entrypoint.sh)
 # because loop device mounting is not allowed during Docker build.
 # All setup-*.sh scripts run during first container startup.
 

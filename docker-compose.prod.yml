@@ -1,0 +1,62 @@
+# Production Docker Compose - Uses Pre-Built Image
+# No build required, just pull and run!
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up
+
+services:
+  vm-orchestrator:
+    # Use pre-built image from GitHub Container Registry
+    image: ghcr.io/YOUR_USERNAME/mono-sandbox:latest
+    
+    # Remove the build section - we're using pre-built image!
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    
+    container_name: monosandbox-vm-orchestrator
+    privileged: true
+    devices:
+      - /dev/kvm:/dev/kvm
+    ports:
+      - "3003:3003"
+      - "10000-60000:10000-60000"
+    volumes:
+      - firecracker-rootfs:/opt/firecracker/rootfs
+      - firecracker-cache:/opt/firecracker/cache
+      - firecracker-projects:/opt/firecracker/projects
+      - ./projects:/sandboxes
+    environment:
+      - NODE_ENV=production
+    networks:
+      - monosandbox
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: monosandbox-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./alerting_rules.yml:/etc/prometheus/alerting_rules.yml
+      - prometheus-data:/prometheus
+    networks:
+      - monosandbox
+    restart: unless-stopped
+
+networks:
+  monosandbox:
+    driver: bridge
+
+volumes:
+  firecracker-rootfs:
+  firecracker-cache:
+  firecracker-projects:
+  prometheus-data:

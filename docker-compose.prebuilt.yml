@@ -1,0 +1,17 @@
+# Docker Compose override to use pre-built rootfs artifact
+# 
+# Usage:
+#   1. Copy this file: cp docker-compose.prebuilt.yml docker-compose.override.yml
+#   2. Update ROOTFS_ARTIFACT_URL with your artifact URL
+#   3. Run: docker compose up
+#
+# The override will automatically be used by docker compose
+
+services:
+  vm-orchestrator:
+    build:
+      args:
+        # Replace with your rootfs artifact URL from GitHub releases or CDN
+        ROOTFS_ARTIFACT_URL: "https://github.com/YOUR_USERNAME/mono-sandbox/releases/download/v1.0.0/ubuntu-rootfs-v1.0.0-TIMESTAMP.ext4.zst"
+    # Optional: Use pre-built image from registry instead of building
+    # image: ghcr.io/YOUR_USERNAME/mono-sandbox:latest

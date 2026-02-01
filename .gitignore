@@ -51,3 +51,4 @@ next-env.d.ts
 app.db
 app.db-shm
 app.db-wal
+rootfs-artifacts
