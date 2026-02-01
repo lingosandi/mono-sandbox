@@ -402,7 +402,7 @@ export function createVMOrchestrator(
                     ],
                     {
                         stdio: ENABLE_VERBOSE_BOOT_LOGS
-                            ? ["ignore", consoleLogFd!.fd, consoleLogFd!.fd]
+                            ? ["ignore", consoleLogFd!.fd, "inherit"] // stderr to console for debugging
                             : ["ignore", "ignore", "ignore"],
                         detached: false
                     }
