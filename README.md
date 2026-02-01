@@ -10,6 +10,8 @@ Full-stack sandbox environment with Next.js IDE and Firecracker microVMs.
   <img src="./public/agencize-logo.png" alt="Agencize" height="60">
 </p>
 
+https://github.com/user-attachments/assets/ca19234c-3e54-4cc8-8fe8-d3b3c76f6ec9
+
 ## Requirements
 
 - **Bun**: Latest version ([install](https://bun.sh))
