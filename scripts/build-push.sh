@@ -42,15 +42,15 @@ retry_command() {
 echo "Building Docker image with pre-built rootfs..."
 
 retry_command "Docker Build" docker build \
-  --build-arg ROOTFS_ARTIFACT_URL="https://github.com/lingosandi/mono-sandbox/releases/download/1.0.1/ubuntu-rootfs.ext4.zst" \
-  -t ghcr.io/lingosandi/mono-sandbox:1.0.1 \
+  --build-arg ROOTFS_ARTIFACT_URL="https://github.com/lingosandi/mono-sandbox/releases/download/1.0.3/ubuntu-rootfs.ext4.zst" \
+  -t ghcr.io/lingosandi/mono-sandbox:1.0.3 \
   -t ghcr.io/lingosandi/mono-sandbox:latest \
   .
 
 echo ""
 echo "Pushing to GitHub Container Registry..."
 
-retry_command "Push 1.0.1" docker push ghcr.io/lingosandi/mono-sandbox:1.0.1
+retry_command "Push 1.0.3" docker push ghcr.io/lingosandi/mono-sandbox:1.0.3
 retry_command "Push latest" docker push ghcr.io/lingosandi/mono-sandbox:latest
 
 echo ""

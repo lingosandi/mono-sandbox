@@ -74,10 +74,18 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
         fi
     fi
     
-    # Check if rootfs was just created (docker-entrypoint.sh prints this)
+    # Check if rootfs was just created (docker-entrypoint.sh prints this)  
     if echo "$CURRENT_LOGS" | grep -q "✓ Rootfs ready:"; then
         if [ "$ROOTFS_READY" = false ]; then
             echo "→ Rootfs creation completed!"
+            ROOTFS_READY=true
+        fi
+    fi
+    
+    # Also check for validation message (appears after rootfs is ready)
+    if echo "$CURRENT_LOGS" | grep -q "✓ Rootfs:.*\[VALID\]"; then
+        if [ "$ROOTFS_READY" = false ]; then
+            echo "→ Rootfs validated successfully!"
             ROOTFS_READY=true
         fi
     fi

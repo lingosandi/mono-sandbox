@@ -700,8 +700,8 @@ export PATH="/root/.bun/bin:\$PATH"
 # Playwright browsers location (installed in rootfs, read-only shared across VMs)
 export PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
 
-# Set HOME to /mnt/project for writable user data
-export HOME=/mnt/project
+# Set HOME to /root (standard location, persistent with overlay disk)
+export HOME=/root
 cd /mnt/project 2>/dev/null || true
 
 # Auto-create and activate Python virtual environment with system packages access

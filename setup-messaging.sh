@@ -91,7 +91,7 @@ def show_stream(url):
     """Show an agent stream in the preview panel.
     
     Args:
-        url: Stream URL (e.g., https://wuying.aliyun.com/mcp.html?authcode=xxx&resourceId=yyy)
+        url: Stream URL (e.g., https://example.com/stream)
     """
     try:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -138,7 +138,7 @@ class AgentBridge:
         """Show an agent stream in the preview panel.
         
         Args:
-            url: Stream URL (e.g., https://wuying.aliyun.com/mcp.html?authcode=xxx&resourceId=yyy)
+            url: Stream URL (e.g., https://example.com/stream)
         """
         if not self.sock:
             return False
