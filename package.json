@@ -13,11 +13,10 @@
         "reload-container": "docker compose restart vm-orchestrator",
         "clear-rootfs": "docker compose exec vm-orchestrator rm -f /opt/firecracker/rootfs/ubuntu.ext4",
         "clear-vm-cache": "docker compose run --rm --no-deps --entrypoint sh vm-orchestrator -lc \"rm -rf /opt/firecracker/cache/uv /opt/firecracker/cache/uv-install.sh /opt/firecracker/cache/uv-install.sh.sha256 /opt/firecracker/cache/volta-install.sh /opt/firecracker/cache/volta-install.sh.sha256\"",
+        "prebuild": "rm -rf .next",
         "build": "next build",
         "start": "next start -p 3002",
-        "lint": "eslint",
-        "clear-cache": "rm -rf .next",
-        "postinstall": "rm -rf .next"
+        "lint": "eslint"
     },
     "dependencies": {
         "@hookform/resolvers": "^5.2.2",
