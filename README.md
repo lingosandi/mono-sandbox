@@ -6,7 +6,6 @@ Full-stack sandbox environment with Next.js IDE and Firecracker microVMs.
 
 - **Bun**: Latest version ([install](https://bun.sh))
 - **Docker**: 20.10+ with Docker Compose ([install](https://docs.docker.com/get-docker/))
-- **OS**: Linux (KVM), macOS (limited), Windows (WSL2 recommended)
 
 ## Quick Start
 
