@@ -133,7 +133,7 @@ async function main() {
     // Create HTTP server for WebSocket
     const httpServer = createServer(async (req, res) => {
         // Add CORS headers for all requests
-        res.setHeader("Access-Control-Allow-Origin", "http://localhost:3002")
+        res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000")
         res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         res.setHeader("Access-Control-Allow-Headers", "Content-Type")
         res.setHeader("Access-Control-Max-Age", "86400") // 24 hours

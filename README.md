@@ -9,10 +9,11 @@ Full-stack sandbox environment with Next.js IDE and Firecracker microVMs.
 
 ## Quick Start
 
-### 1. Install Dependencies
+### 1. Install Dependencies and Build Frontend
 
 ```bash
 bun install
+bun run build
 ```
 
 ### 2. Setup Container (First Time Only)
@@ -30,10 +31,9 @@ bun start-container
 ### 4. Start Frontend (Next.js)
 
 ```bash
-bun build
 bun start
 ```
 
 ### 5. Access
 
-- **IDE**: http://localhost:3002
+- **IDE**: http://localhost:3000

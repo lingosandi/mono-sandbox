@@ -3,9 +3,9 @@
     "version": "0.1.0",
     "private": true,
     "scripts": {
-        "dev": "next dev -p 3002",
+        "dev": "next dev",
         "dev:vm": "docker compose up vm-orchestrator",
-        "setup-container": "docker pull ghcr.io/lingosandi/mono-sandbox:latest",
+        "setup-container": "bun scripts/setup-container.js",
         "start-container": "docker compose -f docker-compose.prod.yml up -d",
         "docker-shell": "docker compose exec vm-orchestrator bash",
         "reload-vsock": "docker compose exec vm-orchestrator bash /app/setup-vsock-binaries.sh && docker compose restart vm-orchestrator",
@@ -14,7 +14,7 @@
         "clear-rootfs": "docker compose exec vm-orchestrator rm -f /opt/firecracker/rootfs/ubuntu.ext4",
         "clear-vm-cache": "docker compose run --rm --no-deps --entrypoint sh vm-orchestrator -lc \"rm -rf /opt/firecracker/cache/uv /opt/firecracker/cache/uv-install.sh /opt/firecracker/cache/uv-install.sh.sha256 /opt/firecracker/cache/volta-install.sh /opt/firecracker/cache/volta-install.sh.sha256\"",
         "build": "next build",
-        "start": "next start -p 3002",
+        "start": "next start",
         "lint": "eslint",
         "clear-cache": "rm -rf .next",
         "postinstall": "rm -rf .next"
