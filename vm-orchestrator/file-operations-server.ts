@@ -105,12 +105,90 @@ function getVMFileServerPort(vmId: string): number {
     return getHostPortForVM(vmId, 8080)
 }
 
+// Hoisted helper - Poll file server readiness via direct VM IP connection
+// This bypasses the port forward to avoid connection timeout issues during boot
+async function waitForFileServerInVM(
+    vmIP: string,
+    maxWaitSeconds: number = 120
+): Promise<boolean> {
+    const startTime = Date.now()
+    const maxWaitMs = maxWaitSeconds * 1000
+    let attempts = 0
+    
+    logBoth("[FileOps] polling-fileserver-direct", {
+        vmIP,
+        maxWaitSeconds
+    })
+    
+    while (Date.now() - startTime < maxWaitMs) {
+        attempts++
+        
+        try {
+            // Connect directly to VM IP on port 8080 with short timeout
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), 2000)
+            
+            try {
+                const response = await fetch(`http://${vmIP}:8080/api/files`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        type: "list",
+                        requestId: "health",
+                        path: "",
+                        depth: 0
+                    }),
+                    signal: controller.signal
+                })
+                
+                clearTimeout(timeoutId)
+                
+                if (response.ok) {
+                    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+                    logBoth("[FileOps] fileserver-ready-direct", {
+                        vmIP,
+                        attempts,
+                        elapsedSeconds: elapsed
+                    })
+                    return true
+                }
+            } finally {
+                // Always clear timeout to prevent leak
+                clearTimeout(timeoutId)
+            }
+        } catch (error) {
+            // Expected during boot - file server not ready yet
+            // Log every 10 attempts to track progress
+            if (attempts % 10 === 0) {
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+                const errorMsg = error instanceof Error ? error.message : String(error)
+                logBoth("[FileOps] fileserver-not-ready-yet", {
+                    vmIP,
+                    attempts,
+                    elapsedSeconds: elapsed,
+                    error: errorMsg
+                })
+            }
+        }
+        
+        // Wait 1 second before next attempt
+        await new Promise(resolve => setTimeout(resolve, 1000))
+    }
+    
+    logBoth("[FileOps] fileserver-timeout-direct", {
+        vmIP,
+        attempts,
+        maxWaitSeconds
+    })
+    return false
+}
+
 // Hoisted helper - Check if fileserver is ready
 async function isFileServerReady(
     fileServerPort: number,
     vmId: string,
     sessionManager: SessionManager,
-    maxRetries: number = 20,
+    maxRetries: number = 30,
     retryDelay: number = 500
 ): Promise<boolean> {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -126,22 +204,42 @@ async function isFileServerReady(
                         path: "",
                         depth: 0
                     }),
-                    signal: AbortSignal.timeout(2000)
+                    signal: AbortSignal.timeout(2000) // 2 seconds per attempt
                 }
             )
             
             if (response.ok) {
+                logBoth("[FileOps] fileserver-ready", { port: fileServerPort, attempts: attempt })
                 return true
+            } else {
+                logBoth("[FileOps] fileserver-not-ok", { 
+                    port: fileServerPort, 
+                    attempt, 
+                    status: response.status,
+                    statusText: response.statusText
+                })
             }
-        } catch {
+        } catch (error) {
             // Connection error - fileserver not ready yet
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            
+            // Only log every 5 attempts to avoid spam
+            if (attempt % 5 === 0 || attempt === 1) {
+                logBoth("[FileOps] fileserver-check-failed", {
+                    port: fileServerPort,
+                    attempt,
+                    maxRetries,
+                    error: errorMsg
+                })
+            }
+            
             if (attempt < maxRetries) {
                 await new Promise((resolve) => setTimeout(resolve, retryDelay))
                 
                 // Check if session still exists before continuing retry loop
                 const currentSession = sessionManager.getSession(vmId)
                 if (!currentSession || currentSession.status === "stopping" || currentSession.status === "stopped") {
-                    console.log(`[FileOps] Session ${vmId} no longer exists or is stopping - aborting fileserver readiness check`)
+                    logBoth("[FileOps] fileserver-check-aborted", { vmId, reason: "session removed or stopped" })
                     return false
                 }
                 
@@ -149,6 +247,8 @@ async function isFileServerReady(
             }
         }
     }
+    
+    logBoth("[FileOps] fileserver-timeout", { port: fileServerPort, maxRetries })
     return false
 }
 
@@ -158,8 +258,8 @@ async function fetchFromFileServer(
     message: FileOperationMessage,
     vmId: string,
     sessionManager: SessionManager,
-    maxRetries: number = 5,
-    initialDelay: number = 500
+    maxRetries: number = 10,
+    initialDelay: number = 1000
 ): Promise<Response> {
     let lastError: Error | null = null
 
@@ -479,7 +579,13 @@ export function createFileOperationsProxy(
                             projectId
                         )
 
+                        logBoth("[FileOps] connect-request", {
+                            projectId,
+                            hasExistingSession: !!session
+                        })
+
                         if (!session) {
+                            logBoth("[FileOps] creating-new-vm", { projectId })
                             // Try creating new session
                             const workspacePath = `/tmp/projects/${projectId}`
                             const newSession = await orchestrator.startVM(
@@ -499,14 +605,119 @@ export function createFileOperationsProxy(
                             fileServerPort = getVMFileServerPort(
                                 newSession.vmId
                             )
+                            
+                            logBoth("[FileOps] new-vm-created", {
+                                vmId: currentVmId,
+                                vmIP: currentVmIp,
+                                port: fileServerPort
+                            })
+                            
+                            // Race condition check: browser might have disconnected during VM creation
+                            if (ws.readyState !== WebSocket.OPEN) {
+                                logBoth("[FileOps] browser-disconnected-during-vm-creation", {
+                                    vmId: currentVmId
+                                })
+                                // Reset connection state
+                                currentVmId = null
+                                currentVmIp = null
+                                fileServerPort = null
+                                return
+                            }
+                            
+                            // For newly created VMs, poll until file server is ready
+                            // Connect directly to VM IP to avoid port forward timeout issues
+                            if (currentVmIp) {
+                                logBoth("[FileOps] new-vm-polling-fileserver", {
+                                    vmId: currentVmId,
+                                    vmIP: currentVmIp
+                                })
+                                const ready = await waitForFileServerInVM(currentVmIp, 120)
+                                if (!ready) {
+                                    // Reset connection state on failure
+                                    currentVmId = null
+                                    currentVmIp = null
+                                    fileServerPort = null
+                                    sendError(ws, message.requestId, "File server failed to start in VM")
+                                    return
+                                }
+                            } else {
+                                // Fallback to fixed wait if no VM IP available
+                                logBoth("[FileOps] new-vm-no-ip-fixed-wait", {
+                                    vmId: currentVmId,
+                                    waitSeconds: 90
+                                })
+                                await new Promise(resolve => setTimeout(resolve, 90000))
+                            }
                         } else {
+                            logBoth("[FileOps] using-existing-vm", {
+                                vmId: session.vmId,
+                                vmIP: session.vmIP,
+                                status: session.status
+                            })
                             currentVmId = session.vmId
                             currentVmIp = session.vmIP || null
                             fileServerPort = getVMFileServerPort(session.vmId)
+                            
+                            // Race condition check: browser might have disconnected
+                            if (ws.readyState !== WebSocket.OPEN) {
+                                logBoth("[FileOps] browser-disconnected-before-polling", {
+                                    vmId: currentVmId
+                                })
+                                // Reset connection state
+                                currentVmId = null
+                                currentVmIp = null
+                                fileServerPort = null
+                                return
+                            }
+                            
+                            // If VM is starting and doesn't have IP yet, wait for it to be ready
+                            if (!currentVmIp && (session.status === "starting" || session.status === "running")) {
+                                logBoth("[FileOps] existing-vm-no-ip-waiting", {
+                                    vmId: currentVmId,
+                                    status: session.status
+                                })
+                                
+                                // Poll until VM IP is set (max 30 seconds)
+                                const startWait = Date.now()
+                                while (Date.now() - startWait < 30000) {
+                                    await new Promise(resolve => setTimeout(resolve, 500))
+                                    const updatedSession = sessionManager.getSession(currentVmId)
+                                    if (updatedSession?.vmIP) {
+                                        currentVmIp = updatedSession.vmIP
+                                        logBoth("[FileOps] existing-vm-ip-acquired", {
+                                            vmId: currentVmId,
+                                            vmIP: currentVmIp,
+                                            waitedMs: Date.now() - startWait
+                                        })
+                                        
+                                        // Now poll file server directly
+                                        const ready = await waitForFileServerInVM(currentVmIp, 120)
+                                        if (!ready) {
+                                            // Reset connection state on failure
+                                            currentVmId = null
+                                            currentVmIp = null
+                                            fileServerPort = null
+                                            sendError(ws, message.requestId, "File server failed to start in VM")
+                                            return
+                                        }
+                                        break
+                                    }
+                                }
+                                
+                                if (!currentVmIp) {
+                                    logBoth("[FileOps] existing-vm-ip-timeout", {
+                                        vmId: currentVmId
+                                    })
+                                }
+                            }
                         }
 
                         // Ensure we have a valid vmId before proceeding
                         if (!currentVmId) {
+                            // Reset connection state
+                            currentVmId = null
+                            currentVmIp = null
+                            fileServerPort = null
                             sendError(ws, message.requestId, "Failed to obtain VM ID")
                             return
                         }
@@ -519,10 +730,14 @@ export function createFileOperationsProxy(
                             vmIP: currentVmIp || undefined
                         })
 
-                        // Wait for fileserver to be ready before responding
-                        // This ensures frontend file operations work immediately
-                        const ready = await isFileServerReady(fileServerPort, currentVmId, sessionManager, 20, 500)
+                        // Wait for fileserver to be ready through the port forward
+                        // Should succeed quickly since we already verified file server is running
+                        const ready = await isFileServerReady(fileServerPort, currentVmId, sessionManager, 30)
                         if (!ready) {
+                            // Reset connection state on failure
+                            currentVmId = null
+                            currentVmIp = null
+                            fileServerPort = null
                             sendError(ws, message.requestId, "VM fileserver failed to start in time")
                             return
                         }
@@ -634,6 +849,10 @@ export function createFileOperationsProxy(
                 }
                 vmFileWatcherWs = null
             }
+            // Clear connection metadata to prevent memory leaks
+            currentVmId = null
+            currentVmIp = null
+            fileServerPort = null
         }
 
         ws.on("close", cleanupConnection)
