@@ -2,6 +2,14 @@
 
 Full-stack sandbox environment with Next.js IDE and Firecracker microVMs.
 
+<p align="center">
+  <em>in collaboration with</em>
+  <br/>
+  <img src="./public/mono-logo.jpg" alt="Mono" height="60">
+  <span style="margin: 0 20px;">×</span>
+  <img src="./public/agencize-logo.png" alt="Agencize" height="60">
+</p>
+
 ## Requirements
 
 - **Bun**: Latest version ([install](https://bun.sh))
