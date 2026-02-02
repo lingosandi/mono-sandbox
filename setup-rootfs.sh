@@ -194,6 +194,19 @@ if ! chroot "$MOUNT_DIR" /bin/bash -c 'export DEBIAN_FRONTEND=noninteractive; ex
     exit 1
 fi
 
+echo "  → Updating CA certificates..."
+if ! chroot "$MOUNT_DIR" /bin/bash -c 'update-ca-certificates'; then
+    echo "  ✗ Failed to update CA certificates"
+    umount "$MOUNT_DIR/dev/pts" 2>/dev/null || true
+    umount "$MOUNT_DIR/dev" 2>/dev/null || true
+    umount "$MOUNT_DIR/sys" 2>/dev/null || true
+    umount "$MOUNT_DIR/proc" 2>/dev/null || true
+    umount "$MOUNT_DIR"
+    rmdir "$MOUNT_DIR"
+    exit 1
+fi
+echo "  ✓ SSL/TLS certificates configured"
+
 echo "  → Cleaning apt lists..."
 chroot "$MOUNT_DIR" /bin/bash -c 'rm -rf /var/lib/apt/lists/*'
 
