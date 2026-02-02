@@ -1,6 +1,6 @@
 # Mono Sandbox
 
-Full-stack sandbox environment with Next.js IDE and Firecracker microVMs. Perfect for building your own Manus, Repl.it, CodeSandbox, or run your Moltbot/OpenClaw in the cloud.
+Full-stack sandbox environment with Next.js IDE and Firecracker microVMs. Perfect for building your own Manus, Lovable, Repl.it, CodeSandbox, or run your Moltbot/OpenClaw in the cloud.
 
 <p align="center">
   <em>in collaboration with</em>
