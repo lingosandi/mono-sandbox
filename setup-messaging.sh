@@ -268,8 +268,8 @@ StandardOutput=journal
 StandardError=journal
 Environment=NODE_ENV=production
 Environment=IN_FIRECRACKER_VM=1
-Environment=VOLTA_HOME=/root/.volta
-Environment=PATH=/root/.bun/bin:/root/.volta/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=NVM_DIR=/root/.nvm
+Environment=PATH=/root/.bun/bin:/root/.nvm/versions/node/v22/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 [Install]
 WantedBy=multi-user.target

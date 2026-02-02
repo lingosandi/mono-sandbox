@@ -24,7 +24,7 @@ services:
       # Persistent storage for rootfs (contains installed packages, bun, etc.)
       - firecracker-rootfs:/opt/firecracker/rootfs
       
-      # Persistent storage for installer cache (uv, volta, etc.)
+      # Persistent storage for installer cache (uv, nvm, etc.)
       - firecracker-cache:/opt/firecracker/cache
       
       # Persistent storage for user projects

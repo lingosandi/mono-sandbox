@@ -91,7 +91,9 @@ echo "  → Installing chokidar and ws..."
 if ! retry_cmd chroot "$MOUNT_DIR" /bin/bash -c '
     export DEBIAN_FRONTEND=noninteractive
     export TZ=Etc/UTC
-    export PATH=/root/.bun/bin:/root/.volta/bin:$PATH
+    export NVM_DIR=/root/.nvm
+    [ -s $NVM_DIR/nvm.sh ] && . $NVM_DIR/nvm.sh
+    export PATH=/root/.bun/bin:$PATH
     set -x
     bun add --verbose -g chokidar@3 ws@latest
 '; then
@@ -105,7 +107,9 @@ echo "  → Installing playwright and typescript..."
 if ! retry_cmd chroot "$MOUNT_DIR" /bin/bash -c '
     export DEBIAN_FRONTEND=noninteractive
     export TZ=Etc/UTC
-    export PATH=/root/.bun/bin:/root/.volta/bin:$PATH
+    export NVM_DIR=/root/.nvm
+    [ -s $NVM_DIR/nvm.sh ] && . $NVM_DIR/nvm.sh
+    export PATH=/root/.bun/bin:$PATH
     set -x
     bun add --verbose -g playwright typescript
 '; then
@@ -119,7 +123,9 @@ echo "  → Installing Playwright Chromium..."
 if ! retry_cmd chroot "$MOUNT_DIR" /bin/bash -c '
     export DEBIAN_FRONTEND=noninteractive
     export TZ=Etc/UTC
-    export PATH=/root/.bun/bin:/root/.volta/bin:$PATH
+    export NVM_DIR=/root/.nvm
+    [ -s $NVM_DIR/nvm.sh ] && . $NVM_DIR/nvm.sh
+    export PATH=/root/.bun/bin:$PATH
     export PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
     set -x
     bunx playwright install-deps chromium
@@ -135,7 +141,9 @@ echo "  → Installing chokidar and ws into /usr/local/lib/fileserver..."
 if ! retry_cmd chroot "$MOUNT_DIR" /bin/bash -c '
     export DEBIAN_FRONTEND=noninteractive
     export TZ=Etc/UTC
-    export PATH=/root/.bun/bin:/root/.volta/bin:$PATH
+    export NVM_DIR=/root/.nvm
+    [ -s $NVM_DIR/nvm.sh ] && . $NVM_DIR/nvm.sh
+    export PATH=/root/.bun/bin:$PATH
     set -x
     mkdir -p /usr/local/lib/fileserver
     cd /usr/local/lib/fileserver || exit 1

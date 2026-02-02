@@ -252,9 +252,14 @@ if [ "$UV_INSTALLED" = false ]; then
         echo "  ✓ Downloaded and cached with integrity hash"
     fi
     
+    # Copy installer into chroot temporarily
+    cp "$UV_CACHE" "$MOUNT_DIR/tmp/uv-install.sh"
+    chmod +x "$MOUNT_DIR/tmp/uv-install.sh"
+    
     if ! retry_cmd chroot "$MOUNT_DIR" /bin/bash -c "
-        $(cat "$UV_CACHE") | sh
+        sh /tmp/uv-install.sh
     "; then
+        rm -f "$MOUNT_DIR/tmp/uv-install.sh"
         echo "  ✗ Failed to install uv after retries"
         umount "$MOUNT_DIR/dev/pts" 2>/dev/null || true
         umount "$MOUNT_DIR/dev" 2>/dev/null || true
@@ -264,6 +269,7 @@ if [ "$UV_INSTALLED" = false ]; then
         rmdir "$MOUNT_DIR"
         exit 1
     fi
+    rm -f "$MOUNT_DIR/tmp/uv-install.sh"
     echo "  ✓ uv installed"
 fi
 
@@ -308,36 +314,36 @@ echo "  ✓ python3 and pip3 symlinks created"
 echo "  → Cleaning apt lists..."
 chroot "$MOUNT_DIR" /bin/bash -c 'rm -rf /var/lib/apt/lists/*' 2>/dev/null || true
 
-# Check if Volta is already installed
-VOLTA_INSTALLED=false
-if chroot "$MOUNT_DIR" /bin/bash -c 'command -v volta >/dev/null 2>&1' 2>/dev/null; then
-    VOLTA_INSTALLED=true
-    echo "  ✓ Volta already installed"
+# Check if nvm is already installed
+NVM_INSTALLED=false
+if chroot "$MOUNT_DIR" /bin/bash -c 'test -d /root/.nvm' 2>/dev/null; then
+    NVM_INSTALLED=true
+    echo "  ✓ nvm already installed"
 fi
 
-if [ "$VOLTA_INSTALLED" = false ]; then
-    echo "  → Installing Volta (JavaScript tool manager)..."
-    VOLTA_CACHE="$CACHE_DIR/volta-install.sh"
-    VOLTA_CACHE_SHA="$CACHE_DIR/volta-install.sh.sha256"
+if [ "$NVM_INSTALLED" = false ]; then
+    echo "  → Installing nvm (Node Version Manager)..."
+    NVM_CACHE="$CACHE_DIR/nvm-install.sh"
+    NVM_CACHE_SHA="$CACHE_DIR/nvm-install.sh.sha256"
     CACHE_VALID=false
 
-    if [ -f "$VOLTA_CACHE" ] && [ -f "$VOLTA_CACHE_SHA" ]; then
-        STORED_SHA=$(cat "$VOLTA_CACHE_SHA")
-        CURRENT_SHA=$(sha256sum "$VOLTA_CACHE" | cut -d' ' -f1)
+    if [ -f "$NVM_CACHE" ] && [ -f "$NVM_CACHE_SHA" ]; then
+        STORED_SHA=$(cat "$NVM_CACHE_SHA")
+        CURRENT_SHA=$(sha256sum "$NVM_CACHE" | cut -d' ' -f1)
         if [ "$STORED_SHA" = "$CURRENT_SHA" ]; then
             CACHE_VALID=true
-            echo "  ✓ Cached Volta installer verified"
+            echo "  ✓ Cached nvm installer verified"
         else
-            echo "  ⚠ Volta installer cache invalid, re-downloading"
-            rm -f "$VOLTA_CACHE" "$VOLTA_CACHE_SHA"
+            echo "  ⚠ nvm installer cache invalid, re-downloading"
+            rm -f "$NVM_CACHE" "$NVM_CACHE_SHA"
         fi
     fi
 
     if [ "$CACHE_VALID" = false ]; then
-        VOLTA_TEMP="${VOLTA_CACHE}.tmp"
-        if ! curl -# -fL --retry 3 --retry-all-errors --max-time 120 https://get.volta.sh -o "$VOLTA_TEMP"; then
-            rm -f "$VOLTA_TEMP"
-            echo "  ✗ Failed to download Volta installer"
+        NVM_TEMP="${NVM_CACHE}.tmp"
+        if ! curl -# -fL --retry 3 --retry-all-errors --max-time 120 https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh -o "$NVM_TEMP"; then
+            rm -f "$NVM_TEMP"
+            echo "  ✗ Failed to download nvm installer"
             umount "$MOUNT_DIR/dev/pts" 2>/dev/null || true
             umount "$MOUNT_DIR/dev" 2>/dev/null || true
             umount "$MOUNT_DIR/sys" 2>/dev/null || true
@@ -346,18 +352,23 @@ if [ "$VOLTA_INSTALLED" = false ]; then
             rmdir "$MOUNT_DIR"
             exit 1
         fi
-        VOLTA_HASH=$(sha256sum "$VOLTA_TEMP" | cut -d' ' -f1)
-        mv "$VOLTA_TEMP" "$VOLTA_CACHE"
-        echo "$VOLTA_HASH" > "$VOLTA_CACHE_SHA"
-        echo "  ✓ Volta installer cached"
+        NVM_HASH=$(sha256sum "$NVM_TEMP" | cut -d' ' -f1)
+        mv "$NVM_TEMP" "$NVM_CACHE"
+        echo "$NVM_HASH" > "$NVM_CACHE_SHA"
+        echo "  ✓ nvm installer cached"
     fi
 
+    # Copy installer into chroot temporarily
+    cp "$NVM_CACHE" "$MOUNT_DIR/tmp/nvm-install.sh"
+    chmod +x "$MOUNT_DIR/tmp/nvm-install.sh"
+    
     if ! retry_cmd chroot "$MOUNT_DIR" /bin/bash -c "
-        export VOLTA_HOME=/root/.volta
-        export PATH=\$VOLTA_HOME/bin:\$PATH
-        $(cat "$VOLTA_CACHE") | bash
+        export NVM_DIR=/root/.nvm
+        export PROFILE=/dev/null
+        bash /tmp/nvm-install.sh
     "; then
-        echo "  ✗ Failed to install Volta after retries"
+        rm -f "$MOUNT_DIR/tmp/nvm-install.sh"
+        echo "  ✗ Failed to install nvm after retries"
         umount "$MOUNT_DIR/dev/pts" 2>/dev/null || true
         umount "$MOUNT_DIR/dev" 2>/dev/null || true
         umount "$MOUNT_DIR/sys" 2>/dev/null || true
@@ -366,16 +377,18 @@ if [ "$VOLTA_INSTALLED" = false ]; then
         rmdir "$MOUNT_DIR"
         exit 1
     fi
-    echo "  ✓ Volta installed"
+    rm -f "$MOUNT_DIR/tmp/nvm-install.sh"
+    echo "  ✓ nvm installed"
 fi
 
-echo "  → Installing Node.js 22 (LTS) via Volta..."
+echo "  → Installing Node.js 22 (LTS) via nvm..."
 if ! retry_cmd chroot "$MOUNT_DIR" /bin/bash -c "
-    export VOLTA_HOME=/root/.volta
-    export PATH=\$VOLTA_HOME/bin:\$PATH
-    volta install node@22
+    export NVM_DIR=/root/.nvm
+    [ -s \$NVM_DIR/nvm.sh ] && \. \$NVM_DIR/nvm.sh
+    nvm install 22
+    nvm alias default 22
 "; then
-    echo "  ✗ Failed to install Node.js via Volta"
+    echo "  ✗ Failed to install Node.js via nvm"
     umount "$MOUNT_DIR/dev/pts" 2>/dev/null || true
     umount "$MOUNT_DIR/dev" 2>/dev/null || true
     umount "$MOUNT_DIR/sys" 2>/dev/null || true
@@ -384,7 +397,7 @@ if ! retry_cmd chroot "$MOUNT_DIR" /bin/bash -c "
     rmdir "$MOUNT_DIR"
     exit 1
 fi
-echo "  ✓ Node.js 22 (LTS) installed via Volta"
+echo "  ✓ Node.js 22 (LTS) installed via nvm"
 
 # Install bun
 echo "  → Installing bun..."
@@ -423,11 +436,15 @@ if [ "$CACHE_VALID" = false ]; then
     echo "  ✓ bun installer cached"
 fi
 
+# Copy installer into chroot temporarily
+cp "$BUN_CACHE" "$MOUNT_DIR/tmp/bun-install.sh"
+chmod +x "$MOUNT_DIR/tmp/bun-install.sh"
+
 if ! retry_cmd chroot "$MOUNT_DIR" /bin/bash -c "
     export BUN_INSTALL=/root/.bun
     export PATH=/root/.bun/bin:\$PATH
     set +e
-    $(cat "$BUN_CACHE") | bash
+    bash /tmp/bun-install.sh
     install_status=\$?
     set -e
     if [ ! -x /root/.bun/bin/bun ]; then
@@ -436,6 +453,7 @@ if ! retry_cmd chroot "$MOUNT_DIR" /bin/bash -c "
     ln -s /root/.bun/bin/bun /usr/local/bin/bun
     exit 0
 "; then
+    rm -f "$MOUNT_DIR/tmp/bun-install.sh"
     echo "  ✗ Failed to install bun after retries"
     umount "$MOUNT_DIR/dev/pts" 2>/dev/null || true
     umount "$MOUNT_DIR/dev" 2>/dev/null || true
@@ -445,6 +463,7 @@ if ! retry_cmd chroot "$MOUNT_DIR" /bin/bash -c "
     rmdir "$MOUNT_DIR"
     exit 1
 fi
+rm -f "$MOUNT_DIR/tmp/bun-install.sh"
 echo "  ✓ bun installed"
 
 echo "  → Cleaning up..."
@@ -569,10 +588,10 @@ WorkingDirectory=/
 StandardOutput=append:/tmp/fileserver-output.log
 StandardError=append:/tmp/fileserver-error.log
 Environment=NODE_ENV=production
-Environment=VOLTA_HOME=/root/.volta
+Environment=NVM_DIR=/root/.nvm
 Environment=PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
 Environment=IN_FIRECRACKER_VM=1
-Environment=PATH=/root/.bun/bin:/root/.volta/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH=/root/.bun/bin:/root/.nvm/versions/node/v22/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 [Install]
 WantedBy=multi-user.target
@@ -690,9 +709,10 @@ cat > "$MOUNT_DIR/root/.bashrc" << EOF
 # uv (Python package manager)
 export PATH="/root/.local/bin:\$PATH"
 
-# Volta environment
-export VOLTA_HOME=/root/.volta
-export PATH="\$VOLTA_HOME/bin:\$PATH"
+# nvm environment
+export NVM_DIR=/root/.nvm
+[ -s "\$NVM_DIR/nvm.sh" ] && \. "\$NVM_DIR/nvm.sh"
+[ -s "\$NVM_DIR/bash_completion" ] && \. "\$NVM_DIR/bash_completion"
 
 # bun
 export PATH="/root/.bun/bin:\$PATH"
@@ -745,10 +765,11 @@ EOF
 cat > "$MOUNT_DIR/root/.profile" << 'EOF'
 # ~/.profile: executed by the command interpreter for login shells.
 
-# Set PATH for uv, Volta, and bun
+# Set PATH for uv, nvm, and bun
 export PATH="/root/.local/bin:$PATH"
-export VOLTA_HOME=/root/.volta
-export PATH="$VOLTA_HOME/bin:$PATH"
+export NVM_DIR=/root/.nvm
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
 export PATH="/root/.bun/bin:$PATH"
 
 # If running bash, source .bashrc
@@ -792,7 +813,7 @@ echo "======================================"
 echo ""
 echo "Rootfs now includes:"
 echo "  • Python 3 (via uv)"
-echo "  • Node.js (via Volta)"
+echo "  • Node.js (via nvm)"
 echo "  • CA certificates for SSL/TLS"
 echo "  • Git, vim, nano"
 echo "  • Build tools (gcc, make, etc.)"
