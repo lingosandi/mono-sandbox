@@ -125,7 +125,7 @@ if [ ! -f /opt/firecracker/rootfs/ubuntu.ext4 ]; then
         echo ""
         
         # CRITICAL: Pass temp rootfs path to setup scripts, rollback on failure
-        echo "[1/4] Setting up Python and base tools..."
+        echo "[1/5] Setting up Python and base tools..."
         if ! bash /app/setup-rootfs.sh "$ROOTFS_TEMP"; then
             echo "ERROR: setup-rootfs.sh failed"
             rm -f "$ROOTFS_TEMP"
@@ -133,7 +133,7 @@ if [ ! -f /opt/firecracker/rootfs/ubuntu.ext4 ]; then
             exit 1
         fi
         
-        echo "[2/4] Installing Node.js packages..."
+        echo "[2/5] Installing Node.js packages..."
         if ! bash /app/setup-npm.sh "$ROOTFS_TEMP"; then
             echo "ERROR: setup-npm.sh failed"
             rm -f "$ROOTFS_TEMP"
@@ -149,9 +149,17 @@ if [ ! -f /opt/firecracker/rootfs/ubuntu.ext4 ]; then
             exit 1
         fi
         
-        echo "[4/4] Setting up messaging infrastructure..."
+        echo "[4/5] Setting up messaging infrastructure..."
         if ! bash /app/setup-messaging.sh "$ROOTFS_TEMP"; then
             echo "ERROR: setup-messaging.sh failed"
+            rm -f "$ROOTFS_TEMP"
+            flock -u 200
+            exit 1
+        fi
+        
+        echo "[5/5] Setting up VNC for browser streaming..."
+        if ! bash /app/setup-vnc.sh "$ROOTFS_TEMP"; then
+            echo "ERROR: setup-vnc.sh failed"
             rm -f "$ROOTFS_TEMP"
             flock -u 200
             exit 1
