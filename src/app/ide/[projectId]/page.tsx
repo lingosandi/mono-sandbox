@@ -1,13 +1,15 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useParams } from "next/navigation"
 import { useProjectFiles } from "./hooks/useProjectFiles"
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts"
 import { useClipboard } from "./hooks/useClipboard"
+import { Globe } from "lucide-react"
 import {
     FileExplorer,
-    EditorArea
+    EditorArea,
+    BrowserVNC
 } from "./components"
 
 // Import VM directory utility for console debugging
@@ -119,6 +121,38 @@ export default function IDEProjectPage() {
     }
 
     const activeFileContent = openFiles.find((f) => f.path === activeFile)
+    const [showBrowser, setShowBrowser] = useState(false)
+    const [browserWidth, setBrowserWidth] = useState(50) // percentage
+    const [isResizing, setIsResizing] = useState(false)
+
+    const startResizing = useCallback(() => {
+        setIsResizing(true)
+    }, [])
+
+    const stopResizing = useCallback(() => {
+        setIsResizing(false)
+    }, [])
+
+    const resize = useCallback((e: MouseEvent) => {
+        if (isResizing) {
+            const newWidth = 100 - (e.clientX / window.innerWidth) * 100
+            setBrowserWidth(Math.max(20, Math.min(80, newWidth)))
+        }
+    }, [isResizing])
+
+    useEffect(() => {
+        if (isResizing) {
+            window.addEventListener("mousemove", resize)
+            window.addEventListener("mouseup", stopResizing)
+        } else {
+            window.removeEventListener("mousemove", resize)
+            window.removeEventListener("mouseup", stopResizing)
+        }
+        return () => {
+            window.removeEventListener("mousemove", resize)
+            window.removeEventListener("mouseup", stopResizing)
+        }
+    }, [isResizing, resize, stopResizing])
 
     return (
         <div className="flex h-screen hex-background text-zinc-100 overflow-hidden font-sans selection:bg-blue-500/20">
@@ -135,14 +169,6 @@ export default function IDEProjectPage() {
                 onCreateFolder={() =>
                     setCreatingItem({ type: "directory", parentPath: "" })
                 }
-                onCreateItem={handleCreateItem}
-                onCancelCreate={() => setCreatingItem(null)}
-                onStartCreateFile={(parentPath) =>
-                    setCreatingItem({ type: "file", parentPath })
-                }
-                onStartCreateFolder={(parentPath) =>
-                    setCreatingItem({ type: "directory", parentPath })
-                }
                 onDeleteFile={deleteFile}
                 onCut={handleCut}
                 onCopy={handleCopy}
@@ -151,17 +177,60 @@ export default function IDEProjectPage() {
                 onRenameItem={handleRenameItem}
                 onCancelRename={() => setRenamingItem(null)}
                 clipboardItem={clipboardItem}
+                onCreateItem={handleCreateItem}
+                onCancelCreate={() => setCreatingItem(null)}
+                onStartCreateFile={(parentPath) =>
+                    setCreatingItem({ type: "file", parentPath })
+                }
+                onStartCreateFolder={(parentPath) =>
+                    setCreatingItem({ type: "directory", parentPath })
+                }
             />
 
-            <EditorArea
-                openFiles={openFiles}
-                activeFile={activeFile}
-                activeFileContent={activeFileContent}
-                onSetActiveFile={setActiveFile}
-                onCloseFile={closeFile}
-                onUpdateContent={updateFileContent}
-                projectId={projectId}
-            />
+            <div className="flex flex-1 overflow-hidden relative">
+                <div 
+                    className="flex-1 flex flex-col h-full"
+                    style={{ width: showBrowser ? `${100 - browserWidth}%` : "100%" }}
+                >
+                    <EditorArea
+                        openFiles={openFiles}
+                        activeFile={activeFile}
+                        activeFileContent={activeFileContent}
+                        onSetActiveFile={setActiveFile}
+                        onCloseFile={closeFile}
+                        onUpdateContent={updateFileContent}
+                        projectId={projectId}
+                        resizeTrigger={isResizing}
+                    />
+                </div>
+
+                {showBrowser && (
+                    <>
+                        {/* Resizer Handle */}
+                        <div 
+                            onMouseDown={startResizing}
+                            className={`w-1.5 cursor-col-resize hover:bg-blue-500/50 transition-colors z-20 absolute top-0 bottom-0 ${isResizing ? 'bg-blue-400/50' : 'bg-white/5'}`}
+                            style={{ right: `${browserWidth}%`, transform: 'translateX(50%)' }}
+                        />
+                        <div 
+                            className="h-full border-l border-white/5 bg-black/20"
+                            style={{ width: `${browserWidth}%` }}
+                        >
+                            <BrowserVNC projectId={projectId} />
+                        </div>
+                    </>
+                )}
+            </div>
+
+            {/* Browser toggle button */}
+            <button
+                onClick={() => setShowBrowser(!showBrowser)}
+                className={`fixed bottom-6 right-6 px-5 py-2.5 glass-card hover:bg-white/10 rounded-full text-xs font-semibold transition-all flex items-center gap-2 group z-50 shadow-2xl ${showBrowser ? 'text-blue-400 border-blue-500/30' : 'text-zinc-300'}`}
+                title={showBrowser ? "Hide browser" : "Show browser"}
+            >
+                <Globe className={`h-4 w-4 transition-transform ${showBrowser ? 'rotate-12 scale-110' : 'group-hover:scale-110'}`} />
+                {showBrowser ? "Hide Viewport" : "Browser Preview"}
+            </button>
         </div>
     )
 }

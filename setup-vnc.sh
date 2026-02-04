@@ -54,14 +54,33 @@ if ! chroot "$MOUNT_DIR" /bin/bash -c 'export DEBIAN_FRONTEND=noninteractive; ap
     exit 1
 fi
 
-# Install TigerVNC, noVNC, and minimal window manager
-echo "  → Installing TigerVNC, noVNC, websockify, and Openbox..."
-if ! chroot "$MOUNT_DIR" /bin/bash -c 'export DEBIAN_FRONTEND=noninteractive; export TZ=Etc/UTC; apt-get -o Acquire::Retries=3 install -y --no-install-recommends tigervnc-standalone-server tigervnc-common novnc websockify openbox xfonts-base xfonts-100dpi xfonts-75dpi xfonts-scalable dbus-x11'; then
+# Install TigerVNC, noVNC, minimal window manager
+echo "  → Installing TigerVNC, noVNC, websockify, Openbox, and SSH server..."
+if ! chroot "$MOUNT_DIR" /bin/bash -c 'export DEBIAN_FRONTEND=noninteractive; export TZ=Etc/UTC; apt-get -o Acquire::Retries=3 install -y --no-install-recommends tigervnc-standalone-server tigervnc-common novnc websockify openbox openssh-server wget ca-certificates fonts-liberation libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 libcups2 libdbus-1-3 libdrm2 libgbm1 libgtk-3-0 libnspr4 libnss3 libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 libxrandr2 xfonts-base xfonts-100dpi xfonts-75dpi xfonts-scalable dbus-x11'; then
     echo "  ✗ Failed to install VNC packages"
     cleanup_chroot "$MOUNT_DIR"
     exit 1
 fi
 echo "  ✓ VNC packages installed"
+
+# Download and install Chromium (non-snap version)
+echo "  → Downloading Chromium..."
+if ! chroot "$MOUNT_DIR" /bin/bash -c '
+    cd /tmp
+    wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+    apt-get install -y --no-install-recommends ./google-chrome-stable_current_amd64.deb || true
+    rm -f google-chrome-stable_current_amd64.deb
+'; then
+    echo "  ⚠ Warning: Failed to install Chrome, continuing anyway..."
+fi
+
+# Verify Chromium installation
+if chroot "$MOUNT_DIR" /bin/bash -c 'which google-chrome-stable || which google-chrome || which chromium' >/dev/null 2>&1; then
+    echo "  ✓ Chrome/Chromium installed and verified"
+else
+    echo "  ⚠ WARNING: Chrome/Chromium binary not found after installation"
+    echo "  ⚠ Browser preview may not work. Manual installation may be required."
+fi
 
 # Create VNC password (default: "password" - users should change this)
 echo "  → Configuring VNC password..."
@@ -88,7 +107,7 @@ EOF
 chmod +x "$MOUNT_DIR/root/.vnc/xstartup"
 echo "  ✓ VNC startup script created"
 
-# Create TigerVNC systemd service
+# Create TigerVNC systemd service using Xvnc directly (bypasses hostname check)
 echo "  → Creating TigerVNC systemd service..."
 cat > "$MOUNT_DIR/etc/systemd/system/vncserver.service" << 'EOF'
 [Unit]
@@ -96,11 +115,13 @@ Description=TigerVNC Server
 After=network.target
 
 [Service]
-Type=forking
+Type=simple
 User=root
-Environment=PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
-ExecStart=/usr/bin/vncserver :1 -geometry 1920x1080 -depth 24 -localhost no
-ExecStop=/usr/bin/vncserver -kill :1
+WorkingDirectory=/root
+Environment=HOME=/root
+ExecStartPre=/bin/mkdir -p /root/.vnc
+ExecStart=/usr/bin/Xvnc :1 -geometry 1920x1080 -depth 24 -rfbport 5901 -SecurityTypes None -AlwaysShared -AcceptSetDesktopSize -desktop firecracker-vm
+ExecStartPost=/bin/bash -c 'DISPLAY=:1 /root/.vnc/xstartup &'
 Restart=on-failure
 RestartSec=5
 
@@ -108,10 +129,14 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-# Enable the VNC service
+# Enable the VNC service (check if already enabled to be idempotent)
 mkdir -p "$MOUNT_DIR/etc/systemd/system/multi-user.target.wants"
-ln -sf /etc/systemd/system/vncserver.service "$MOUNT_DIR/etc/systemd/system/multi-user.target.wants/vncserver.service"
-echo "  ✓ TigerVNC service created and enabled"
+if [ ! -L "$MOUNT_DIR/etc/systemd/system/multi-user.target.wants/vncserver.service" ]; then
+    ln -sf /etc/systemd/system/vncserver.service "$MOUNT_DIR/etc/systemd/system/multi-user.target.wants/vncserver.service"
+    echo "  ✓ TigerVNC service created and enabled"
+else
+    echo "  ✓ TigerVNC service already enabled"
+fi
 
 # Create noVNC systemd service (HTTP/WebSocket proxy)
 echo "  → Creating noVNC systemd service..."
@@ -131,9 +156,28 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-# Enable the noVNC service
-ln -sf /etc/systemd/system/novnc.service "$MOUNT_DIR/etc/systemd/system/multi-user.target.wants/novnc.service"
-echo "  ✓ noVNC service created and enabled"
+# Enable the noVNC service (check if already enabled to be idempotent)
+if [ ! -L "$MOUNT_DIR/etc/systemd/system/multi-user.target.wants/novnc.service" ]; then
+    ln -sf /etc/systemd/system/novnc.service "$MOUNT_DIR/etc/systemd/system/multi-user.target.wants/novnc.service"
+    echo "  ✓ noVNC service created and enabled"
+else
+    echo "  ✓ noVNC service already enabled"
+fi
+
+# Enable and configure SSH service for vm-orchestrator access
+echo "  → Configuring SSH service..."
+ln -sf /lib/systemd/system/ssh.service "$MOUNT_DIR/etc/systemd/system/multi-user.target.wants/ssh.service"
+
+# Configure SSH to allow root login with public key authentication
+cat >> "$MOUNT_DIR/etc/ssh/sshd_config" << 'EOF'
+
+# VM orchestrator SSH configuration
+PermitRootLogin yes
+PubkeyAuthentication yes
+PasswordAuthentication no
+EOF
+
+echo "  ✓ SSH service enabled and configured for public key authentication"
 
 # Create helper script to launch Chrome in the VM
 echo "  → Creating Chrome launcher script..."
@@ -141,22 +185,31 @@ cat > "$MOUNT_DIR/usr/local/bin/launch-chrome" << 'EOF'
 #!/bin/bash
 # Launch Chrome in the VNC display
 export DISPLAY=:1
-export PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
 
-# Find chromium binary (Playwright install location)
-CHROMIUM_BIN=$(ls /root/.cache/ms-playwright/chromium-*/chrome-linux/chrome 2>/dev/null | head -1)
-if [ -z "$CHROMIUM_BIN" ] || [ ! -f "$CHROMIUM_BIN" ]; then
-    CHROMIUM_BIN="chromium"
+# Find chromium binary (try multiple locations)
+if [ -f /usr/bin/google-chrome-stable ]; then
+    CHROMIUM_BIN="/usr/bin/google-chrome-stable"
+elif [ -f /usr/bin/google-chrome ]; then
+    CHROMIUM_BIN="/usr/bin/google-chrome"
+elif [ -f /usr/bin/chromium ]; then
+    CHROMIUM_BIN="/usr/bin/chromium"
+else
+    echo "ERROR: No chromium binary found!" >&2
+    exit 1
 fi
 
-# Launch Chrome with proper flags (quoted for safety)
-"$CHROMIUM_BIN" \
+# Launch Chrome with proper flags and detach completely
+nohup "$CHROMIUM_BIN" \
     --no-sandbox \
+    --test-type \
     --disable-dev-shm-usage \
     --disable-gpu \
     --no-first-run \
     --no-default-browser-check \
-    "$@" &
+    "$@" >/dev/null 2>&1 &
+
+# Exit immediately without waiting for Chrome
+exit 0
 EOF
 
 chmod +x "$MOUNT_DIR/usr/local/bin/launch-chrome"

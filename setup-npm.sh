@@ -119,23 +119,6 @@ fi
 echo "  ✓ playwright and typescript installed globally"
 echo ""
 
-echo "  → Installing Playwright Chromium..."
-if ! retry_cmd chroot "$MOUNT_DIR" /bin/bash -c '
-    export DEBIAN_FRONTEND=noninteractive
-    export TZ=Etc/UTC
-    export NVM_DIR=/root/.nvm
-    [ -s $NVM_DIR/nvm.sh ] && . $NVM_DIR/nvm.sh
-    export PATH=/root/.bun/bin:$PATH
-    export PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
-    set -x
-    bunx playwright install-deps chromium
-'; then
-    echo "  ✗ Failed to install Playwright Chromium"
-    exit 1
-fi
-echo "  ✓ Playwright Chromium installed"
-echo ""
-
 # Also install chokidar and ws as local dependencies for the in-VM file server
 echo "  → Installing chokidar and ws into /usr/local/lib/fileserver..."
 if ! retry_cmd chroot "$MOUNT_DIR" /bin/bash -c '

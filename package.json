@@ -13,7 +13,6 @@
         "reload-container": "docker compose restart vm-orchestrator",
         "setup-vnc": "docker compose exec vm-orchestrator bash /app/setup-vnc.sh",
         "clear-rootfs": "docker compose exec vm-orchestrator rm -f /opt/firecracker/rootfs/ubuntu.ext4 /opt/firecracker/rootfs/initramfs.img",
-        "clear-rootfs-prod": "docker compose -f docker-compose.prod.yml exec vm-orchestrator rm -f /opt/firecracker/rootfs/ubuntu.ext4 /opt/firecracker/rootfs/initramfs.img",
         "clear-uv-nvm-cache": "docker compose run --rm --no-deps --entrypoint sh vm-orchestrator -lc \"rm -rf /opt/firecracker/cache/uv /opt/firecracker/cache/uv-install.sh /opt/firecracker/cache/uv-install.sh.sha256 /opt/firecracker/cache/nvm-install.sh /opt/firecracker/cache/nvm-install.sh.sha256\"",
         "build": "next build",
         "start": "next start -p 3002",

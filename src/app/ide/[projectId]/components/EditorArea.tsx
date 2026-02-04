@@ -25,6 +25,7 @@ interface EditorAreaProps {
     onCloseFile: (path: string) => void
     onUpdateContent: (path: string, content: string) => void
     projectId?: string
+    resizeTrigger?: boolean
 }
 
 export function EditorArea({
@@ -34,7 +35,8 @@ export function EditorArea({
     onSetActiveFile,
     onCloseFile,
     onUpdateContent,
-    projectId
+    projectId,
+    resizeTrigger
 }: EditorAreaProps) {
     return (
         <div
@@ -52,7 +54,7 @@ export function EditorArea({
             <div className="flex-1 relative bg-black/20">
                 {/* Keep terminal mounted but hidden when not active */}
                 <div className={activeFile === "terminal" ? "h-full" : "hidden"}>
-                    <Terminal projectId={projectId} />
+                    <Terminal projectId={projectId} resizeTrigger={resizeTrigger} />
                 </div>
                 
                 {activeFile !== "terminal" && activeFileContent ? (

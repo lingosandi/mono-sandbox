@@ -641,6 +641,9 @@ export function createVMOrchestrator(
                 // Kill Firecracker process (use SIGTERM for graceful shutdown)
                 const proc = vmProcesses.get(vmId)
                 if (proc) {
+                    // Remove all event listeners to prevent race conditions
+                    proc.removeAllListeners("error")
+                    proc.removeAllListeners("exit")
                     proc.kill("SIGTERM")
                     vmProcesses.delete(vmId)
                 } else if (session.pid) {

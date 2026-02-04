@@ -28,6 +28,7 @@ RUN --mount=type=cache,target=/var/cache/apt \
         debootstrap \
         busybox-static \
         cpio \
+        openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Install bun (cached installer with integrity check)

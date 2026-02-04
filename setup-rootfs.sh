@@ -130,6 +130,16 @@ chattr -i "$MOUNT_DIR/etc/resolv.conf" 2>/dev/null || true
 rm -f "$MOUNT_DIR/etc/resolv.conf"
 cp /etc/resolv.conf "$MOUNT_DIR/etc/resolv.conf"
 
+# Configure hostname to fix VNC server issue
+echo "  → Configuring hostname..."
+echo "firecracker-vm" > "$MOUNT_DIR/etc/hostname"
+cat > "$MOUNT_DIR/etc/hosts" << 'EOF'
+127.0.0.1 localhost
+127.0.1.1 firecracker-vm
+::1 localhost ip6-localhost ip6-loopback
+EOF
+echo "  ✓ Hostname configured: firecracker-vm"
+
 # Initialize dpkg database if needed
 echo "  → Initializing package database..."
 mkdir -p "$MOUNT_DIR/var/lib/dpkg"
@@ -563,6 +573,22 @@ EOF
 ln -sf /etc/systemd/system/vsock-terminal.service "$MOUNT_DIR/etc/systemd/system/multi-user.target.wants/vsock-terminal.service"
 echo "  ✓ Vsock terminal service enabled"
 
+# Configure SSH access for vm-orchestrator
+echo "  → Configuring SSH access..."
+mkdir -p "$MOUNT_DIR/root/.ssh"
+chmod 700 "$MOUNT_DIR/root/.ssh"
+
+# Install public key if it exists (generated in docker-entrypoint.sh)
+if [ -f /root/.ssh/firecracker_rsa.pub ]; then
+    echo "  → Installing SSH public key..."
+    cat /root/.ssh/firecracker_rsa.pub >> "$MOUNT_DIR/root/.ssh/authorized_keys"
+    chmod 600 "$MOUNT_DIR/root/.ssh/authorized_keys"
+    echo "  ✓ SSH public key installed"
+else
+    echo "  ⚠ SSH public key not found at /root/.ssh/firecracker_rsa.pub"
+    echo "    This will be generated on first container startup"
+fi
+
 # Note: Agent bridge systemd service moved to setup-messaging.sh
 
 # Copy file server script to VM
@@ -698,6 +724,16 @@ ln -sf /lib/systemd/system/systemd-networkd.service "$MOUNT_DIR/etc/systemd/syst
 ln -sf /lib/systemd/system/systemd-networkd.socket "$MOUNT_DIR/etc/systemd/system/sockets.target.wants/systemd-networkd.socket"
 
 echo "  ✓ Network configuration created (run setup-network.sh to configure DNS and IPv6 settings)"
+
+# Enable systemd-timesyncd for accurate VM time (required for TLS/session auth)
+cat > "$MOUNT_DIR/etc/systemd/timesyncd.conf" << 'EOF'
+[Time]
+NTP=0.pool.ntp.org 1.pool.ntp.org 2.pool.ntp.org 3.pool.ntp.org
+FallbackNTP=time.google.com time.cloudflare.com
+EOF
+
+ln -sf /lib/systemd/system/systemd-timesyncd.service "$MOUNT_DIR/etc/systemd/system/multi-user.target.wants/systemd-timesyncd.service"
+echo "  ✓ Time sync enabled (systemd-timesyncd)"
 
 # Configure /etc/hosts with localhost resolution (dual-stack)
 cat > "$MOUNT_DIR/etc/hosts" << 'EOF'

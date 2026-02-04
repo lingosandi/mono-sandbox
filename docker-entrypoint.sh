@@ -38,6 +38,18 @@ fi
 
 echo "✓ KVM device accessible: $(ls -l /dev/kvm)"
 
+# Generate SSH key pair for VM access if it doesn't exist
+if [ ! -f /root/.ssh/firecracker_rsa ]; then
+    echo "→ Generating SSH key pair for VM access..."
+    mkdir -p /root/.ssh
+    ssh-keygen -t rsa -b 4096 -f /root/.ssh/firecracker_rsa -N "" -C "firecracker-vm-access"
+    chmod 600 /root/.ssh/firecracker_rsa
+    chmod 644 /root/.ssh/firecracker_rsa.pub
+    echo "✓ SSH key pair generated: /root/.ssh/firecracker_rsa"
+else
+    echo "✓ SSH key pair exists: /root/.ssh/firecracker_rsa"
+fi
+
 # Create rootfs on first run if it doesn't exist
 if [ ! -f /opt/firecracker/rootfs/ubuntu.ext4 ]; then
     echo "=== Creating Ubuntu rootfs (first run, ~5-10 minutes) ==="

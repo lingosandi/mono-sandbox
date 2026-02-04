@@ -15,6 +15,7 @@ import path from "path"
 import net from "net"
 import crypto from "crypto"
 import { Duplex } from "stream"
+import WebSocket, { WebSocketServer } from "ws"
 import { spawn } from "child_process"
 import { metrics, metricsRegistry, updateResourceMetrics } from "./metrics"
 
@@ -71,7 +72,7 @@ function trackProxyConnection(vmId: string, socket: Duplex | net.Socket): void {
         activeProxyConnections.set(vmId, new Set())
     }
     activeProxyConnections.get(vmId)!.add(socket)
-    
+
     // Auto-cleanup when socket closes
     socket.on("close", () => {
         activeProxyConnections.get(vmId)?.delete(socket)
@@ -137,14 +138,14 @@ async function main() {
         res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         res.setHeader("Access-Control-Allow-Headers", "Content-Type")
         res.setHeader("Access-Control-Max-Age", "86400") // 24 hours
-        
+
         // Handle preflight requests
         if (req.method === "OPTIONS") {
             res.writeHead(204)
             res.end()
             return
         }
-        
+
         if (req.url === "/health") {
             const sessions = sessionManager.getAllSessions()
             res.writeHead(200, { "Content-Type": "application/json" })
@@ -263,13 +264,22 @@ async function main() {
 
                 tarProcess.stdout.pipe(res)
                 
+                const cleanupTarListeners = () => {
+                    tarProcess.removeAllListeners("error")
+                    tarProcess.removeAllListeners("close")
+                    tarProcess.stderr?.removeAllListeners("data")
+                    res.removeListener("close", resCloseHandler)
+                }
+                
                 // Kill tar process if client disconnects
-                res.on("close", () => {
+                const resCloseHandler = () => {
                     if (!tarProcess.killed) {
                         console.log("[OverlayDownload] Client disconnected, killing tar process")
                         tarProcess.kill("SIGTERM")
                     }
-                })
+                    cleanupTarListeners()
+                }
+                res.on("close", resCloseHandler)
 
                 // Handle errors from tar process
                 tarProcess.on("error", (error: Error) => {
@@ -282,6 +292,7 @@ async function main() {
                     if (!tarProcess.killed) {
                         tarProcess.kill("SIGKILL")
                     }
+                    cleanupTarListeners()
                 })
 
                 tarProcess.stderr.on("data", (data: Buffer) => {
@@ -297,6 +308,7 @@ async function main() {
                             res.end(JSON.stringify({ error: "Tar process failed" }))
                         }
                     }
+                    cleanupTarListeners()
                 })
             } catch (error) {
                 console.error("[OverlayDownload] Error:", error)
@@ -428,22 +440,33 @@ async function main() {
                 ])
                 
                 let extractError = ""
-                extractProcess.stderr.on("data", (data: Buffer) => {
+                const stderrHandler = (data: Buffer) => {
                     extractError += data.toString()
-                })
+                }
+                extractProcess.stderr.on("data", stderrHandler)
                 
                 await new Promise<void>((resolve, reject) => {
-                    extractProcess.on("close", (code: number | null) => {
+                    const closeHandler = (code: number | null) => {
+                        extractProcess.stderr?.removeListener("data", stderrHandler)
+                        extractProcess.removeListener("close", closeHandler)
+                        extractProcess.removeListener("error", errorHandler)
+                        
                         if (code !== 0) {
                             reject(new Error(`Extraction failed: ${extractError || `exit code ${code}`}`))
                         } else {
                             resolve()
                         }
-                    })
+                    }
                     
-                    extractProcess.on("error", (error: Error) => {
+                    const errorHandler = (error: Error) => {
+                        extractProcess.stderr?.removeListener("data", stderrHandler)
+                        extractProcess.removeListener("close", closeHandler)
+                        extractProcess.removeListener("error", errorHandler)
                         reject(error)
-                    })
+                    }
+                    
+                    extractProcess.on("close", closeHandler)
+                    extractProcess.on("error", errorHandler)
                 })
                 
                 // Find the extracted file in our temp directory
@@ -999,6 +1022,16 @@ To check mount status:
 
             const controller = new AbortController()
             let timeout: NodeJS.Timeout | null = null
+            
+            const abortOnClose = () => {
+                controller.abort()
+            }
+            
+            const cleanupListeners = () => {
+                req.removeListener("aborted", abortOnClose)
+                req.removeListener("close", abortOnClose)
+                res.removeListener("close", abortOnClose)
+            }
 
             try {
                 validateIdentifier(projectId, "projectId")
@@ -1040,7 +1073,6 @@ To check mount status:
                 }
 
                 timeout = setTimeout(() => controller.abort(), 30000)
-                const abortOnClose = () => controller.abort()
 
                 req.once("aborted", abortOnClose)
                 req.once("close", abortOnClose)
@@ -1057,6 +1089,7 @@ To check mount status:
                         totalBytes += chunk.length
                         if (totalBytes > MAX_PROXY_BODY_SIZE) {
                             if (timeout) clearTimeout(timeout)
+                            cleanupListeners()
                             res.writeHead(413, { "Content-Type": "application/json" })
                             res.end(
                                 JSON.stringify({
@@ -1093,8 +1126,10 @@ To check mount status:
                     res.end()
                 }
                 if (timeout) clearTimeout(timeout)
+                cleanupListeners()
             } catch (error) {
                 if (timeout) clearTimeout(timeout)
+                cleanupListeners()
                 console.error("[Proxy] Error:", error)
                 if (controller.signal.aborted || res.destroyed) {
                     return
@@ -1173,6 +1208,139 @@ To check mount status:
                     )
                 }
             })
+        } else if (req.method === "POST" && req.url?.startsWith("/api/vm/") && req.url.includes("/exec")) {
+            // Execute command in VM
+            const urlParts = req.url.split("/")
+            const vmId = urlParts[3]
+            
+            console.log(`[VMExec] Request for VM: ${vmId}`)
+            
+            let body = ""
+            req.on("data", (chunk) => {
+                body += chunk.toString()
+            })
+
+            req.on("end", async () => {
+                try {
+                    validateIdentifier(vmId, "vmId")
+                    
+                    let parsedBody: { command: string }
+                    try {
+                        parsedBody = JSON.parse(body)
+                    } catch {
+                        console.error(`[VMExec] Invalid JSON in request body`)
+                        res.writeHead(400, { "Content-Type": "application/json" })
+                        res.end(JSON.stringify({ error: "Invalid JSON in request body" }))
+                        return
+                    }
+
+                    const { command } = parsedBody
+                    console.log(`[VMExec] Command: ${command}`)
+                    
+                    if (!command || typeof command !== "string") {
+                        console.error(`[VMExec] Missing or invalid command`)
+                        res.writeHead(400, { "Content-Type": "application/json" })
+                        res.end(JSON.stringify({ error: "Command is required" }))
+                        return
+                    }
+
+                    const session = sessionManager.getSession(vmId)
+                    if (!session || session.status !== "running") {
+                        console.error(`[VMExec] VM not running: ${vmId}`)
+                        res.writeHead(404, { "Content-Type": "application/json" })
+                        res.end(JSON.stringify({ error: "VM not running" }))
+                        return
+                    }
+
+                    console.log(`[VMExec] Session found. VM IP: ${session.vmIP}`)
+                    
+                    // Execute command via vsock
+                    console.log(`[VMExec] Executing command in VM ${vmId}: ${command}`)
+                    
+                    // Use ssh to execute command in VM
+                    const sshCommand = `ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /root/.ssh/firecracker_rsa root@${session.vmIP} "${command}"`
+                    
+                    console.log(`[VMExec] SSH command: ${sshCommand}`)
+                    
+                    const { stdout, stderr } = await execAsync(sshCommand)
+                    
+                    console.log(`[VMExec] Success! stdout: ${stdout.trim()}, stderr: ${stderr.trim()}`)
+                    
+                    res.writeHead(200, { "Content-Type": "application/json" })
+                    res.end(JSON.stringify({
+                        success: true,
+                        stdout: stdout.trim(),
+                        stderr: stderr.trim()
+                    }))
+                } catch (error) {
+                    console.error("[VMExec] Error:", error)
+                    res.writeHead(500, { "Content-Type": "application/json" })
+                    res.end(
+                        JSON.stringify({
+                            error:
+                                error instanceof Error
+                                    ? error.message
+                                    : "Failed to execute command"
+                        })
+                    )
+                }
+            })
+        } else if (req.method === "GET" && req.url?.startsWith("/api/vm/") && req.url.includes("/ports")) {
+            // Get port mappings for a VM
+            const urlParts = req.url.split("/")
+            const vmId = urlParts[3]
+            
+            console.log(`[VMPorts] Request for VM: ${vmId}`)
+            
+            try {
+                validateIdentifier(vmId, "vmId")
+                
+                const session = sessionManager.getSession(vmId)
+                if (!session) {
+                    console.error(`[VMPorts] VM not found: ${vmId}`)
+                    res.writeHead(404, { "Content-Type": "application/json" })
+                    res.end(JSON.stringify({ error: "VM not found" }))
+                    return
+                }
+
+                console.log(`[VMPorts] Session found. VM IP: ${session.vmIP}, status: ${session.status}`)
+
+                // Start VNC port forwarding if not already running
+                console.log(`[VMPorts] Getting VNC host port for VM ${vmId}...`)
+                const vncHostPort = getHostPortForVM(vmId, 6080)
+                console.log(`[VMPorts] VNC host port: ${vncHostPort}`)
+                
+                console.log(`[VMPorts] Starting VNC port forward: ${vncHostPort} -> ${session.vmIP}:6080`)
+                startPortForward({
+                    vmId,
+                    vmPort: 6080,
+                    hostPort: vncHostPort,
+                    vmIP: session.vmIP
+                })
+                
+                // Get fileserver port (8080) forwarding
+                const fileserverPort = getHostPortForVM(vmId, 8080)
+                console.log(`[VMPorts] Fileserver port: ${fileserverPort}`)
+
+                console.log(`[VMPorts] Returning ports - VNC: ${vncHostPort}, Fileserver: ${fileserverPort}`)
+                res.writeHead(200, { "Content-Type": "application/json" })
+                res.end(JSON.stringify({
+                    vnc: vncHostPort,
+                    fileserver: fileserverPort,
+                    vmIP: session.vmIP
+                }))
+            } catch (error) {
+                console.error("[VMPorts] Error:", error)
+                res.writeHead(500, { "Content-Type": "application/json" })
+                res.end(
+                    JSON.stringify({
+                        error:
+                            error instanceof Error
+                                ? error.message
+                                : "Failed to get ports"
+                    })
+                )
+            }
         } else {
             res.writeHead(404)
             res.end("Not Found")
@@ -1195,97 +1363,157 @@ To check mount status:
         metrics
     )
 
+    const proxyWss = new WebSocketServer({ noServer: true })
+
     // WebSocket proxy for VM app servers (socket.io, etc.)
-    httpServer.on("upgrade", (req, socket) => {
-        // Check if this is a proxy WebSocket upgrade
-        if (req.url?.startsWith("/api/proxy/")) {
-            const urlParts = req.url.split("/").filter(p => p)
-            
-            if (urlParts.length < 4) {
+    httpServer.on("upgrade", (req, socket, head) => {
+        if (!req.url?.startsWith("/api/proxy/")) {
+            return
+        }
+
+        console.log(`[ProxyWS] Upgrade request: ${req.method} ${req.url}`)
+        console.log("[ProxyWS] Request headers:", {
+            origin: req.headers.origin,
+            host: req.headers.host,
+            connection: req.headers.connection,
+            upgrade: req.headers.upgrade,
+            secWebSocketKey: req.headers["sec-websocket-key"],
+            secWebSocketVersion: req.headers["sec-websocket-version"],
+            secWebSocketProtocol: req.headers["sec-websocket-protocol"]
+        })
+
+        const urlParts = req.url.split("/").filter(p => p)
+        if (urlParts.length < 4) {
+            socket.write("HTTP/1.1 400 Bad Request\r\n\r\n")
+            socket.destroy()
+            return
+        }
+
+        const projectId = urlParts[2]
+        const vmPort = parseInt(urlParts[3])
+        const vmPath = urlParts.slice(4).join("/")
+
+        try {
+            validateIdentifier(projectId, "projectId")
+
+            if (isNaN(vmPort) || vmPort < 1 || vmPort > 65535) {
                 socket.write("HTTP/1.1 400 Bad Request\r\n\r\n")
                 socket.destroy()
                 return
             }
 
-            const projectId = urlParts[2]
-            const vmPort = parseInt(urlParts[3])
-
-            try {
-                validateIdentifier(projectId, "projectId")
-
-                if (isNaN(vmPort) || vmPort < 1 || vmPort > 65535) {
-                    socket.write("HTTP/1.1 400 Bad Request\r\n\r\n")
-                    socket.destroy()
-                    return
-                }
-
-                // Get existing session
-                const session = sessionManager.getSessionByProject(projectId)
-                
-                if (!session) {
-                    socket.write("HTTP/1.1 404 Not Found\r\n\r\n")
-                    socket.destroy()
-                    return
-                }
-
-                // Start port forward if not already running
-                const hostPort = getHostPortForVM(session.vmId, vmPort)
-                startPortForward({
-                    vmId: session.vmId,
-                    vmPort,
-                    hostPort,
-                    vmIP: session.vmIP
-                })
-
-                // Connect to the forwarded port
-                const upstreamSocket = net.connect(hostPort, "localhost")
-
-                // Track connection for cleanup when VM stops
-                trackProxyConnection(session.vmId, socket)
-                trackProxyConnection(session.vmId, upstreamSocket)
-
-                upstreamSocket.on("connect", () => {
-                    // Forward the upgrade request
-                    const vmPath = urlParts.slice(4).join("/")
-                    const path = vmPath ? `/${vmPath}` : "/"
-                    
-                    upstreamSocket.write(
-                        `${req.method} ${path} HTTP/1.1\r\n` +
-                        Object.entries(req.headers)
-                            .map(([key, value]) => `${key}: ${value}`)
-                            .join("\r\n") +
-                        "\r\n\r\n"
-                    )
-
-                    // Pipe bidirectionally
-                    socket.pipe(upstreamSocket)
-                    upstreamSocket.pipe(socket)
-                })
-
-                upstreamSocket.on("error", (err) => {
-                    console.error("[ProxyWS] Upstream socket error:", err)
-                    socket.destroy()
-                })
-
-                socket.on("error", (err) => {
-                    console.error("[ProxyWS] Client socket error:", err)
-                    upstreamSocket.destroy()
-                })
-
-                socket.on("close", () => {
-                    upstreamSocket.destroy()
-                })
-
-                upstreamSocket.on("close", () => {
-                    socket.destroy()
-                })
-            } catch (error) {
-                console.error("[ProxyWS] Error:", error)
-                socket.write("HTTP/1.1 500 Internal Server Error\r\n\r\n")
+            const session = sessionManager.getSessionByProject(projectId)
+            if (!session) {
+                socket.write("HTTP/1.1 404 Not Found\r\n\r\n")
                 socket.destroy()
+                return
             }
+
+            const hostPort = getHostPortForVM(session.vmId, vmPort)
+            startPortForward({
+                vmId: session.vmId,
+                vmPort,
+                hostPort,
+                vmIP: session.vmIP
+            })
+
+            proxyWss.handleUpgrade(req, socket, head, (clientWs) => {
+                const protocolHeader = req.headers["sec-websocket-protocol"]
+                const protocols =
+                    typeof protocolHeader === "string"
+                        ? protocolHeader.split(",").map(p => p.trim()).filter(Boolean)
+                        : undefined
+
+                const upstreamUrl = `ws://localhost:${hostPort}/${vmPath}`
+                
+                let upstreamWs: WebSocket | null = null
+                let isCleanedUp = false
+                
+                try {
+                    upstreamWs = new WebSocket(upstreamUrl, protocols)
+                } catch (error) {
+                    console.error(`[ProxyWS] Failed to create upstream WebSocket:`, error)
+                    clientWs.close(1011, "Failed to connect to upstream")
+                    return
+                }
+
+                const clientSocket = (clientWs as unknown as { _socket?: net.Socket })._socket
+                const upstreamSocket = (upstreamWs as unknown as { _socket?: net.Socket })._socket
+                if (clientSocket) {
+                    trackProxyConnection(session.vmId, clientSocket)
+                }
+                if (upstreamSocket) {
+                    trackProxyConnection(session.vmId, upstreamSocket)
+                }
+
+                let upstreamBytes = 0
+                let clientBytes = 0
+
+                upstreamWs.on("open", () => {
+                    console.log(`[ProxyWS] Upstream WS open: ${upstreamUrl}`)
+                })
+
+                upstreamWs.on("message", (data) => {
+                    if (isCleanedUp) return
+                    const isBinary = data instanceof Buffer || data instanceof ArrayBuffer || ArrayBuffer.isView(data)
+                    upstreamBytes += isBinary
+                        ? (data as Buffer).length ?? (data as ArrayBuffer).byteLength
+                        : Buffer.byteLength(String(data))
+                    if (clientWs.readyState === WebSocket.OPEN) {
+                        clientWs.send(data, { binary: isBinary })
+                    }
+                })
+
+                clientWs.on("message", (data) => {
+                    if (isCleanedUp) return
+                    const isBinary = data instanceof Buffer || data instanceof ArrayBuffer || ArrayBuffer.isView(data)
+                    clientBytes += isBinary
+                        ? (data as Buffer).length ?? (data as ArrayBuffer).byteLength
+                        : Buffer.byteLength(String(data))
+                    if (upstreamWs && upstreamWs.readyState === WebSocket.OPEN) {
+                        upstreamWs.send(data, { binary: isBinary })
+                    }
+                })
+
+                const logBytes = () => {
+                    console.log(
+                        `[ProxyWS] Bytes - client->upstream: ${clientBytes}, upstream->client: ${upstreamBytes}`
+                    )
+                }
+
+                const cleanup = () => {
+                    if (isCleanedUp) return
+                    isCleanedUp = true
+                    logBytes()
+                    if (clientWs.readyState === WebSocket.OPEN || clientWs.readyState === WebSocket.CONNECTING) {
+                        clientWs.close()
+                    }
+                    if (upstreamWs && (upstreamWs.readyState === WebSocket.OPEN || upstreamWs.readyState === WebSocket.CONNECTING)) {
+                        upstreamWs.close()
+                    }
+                }
+
+                clientWs.on("close", cleanup)
+                if (upstreamWs) {
+                    upstreamWs.on("close", cleanup)
+                }
+
+                clientWs.on("error", (err) => {
+                    console.error("[ProxyWS] Client WS error:", err)
+                    cleanup()
+                })
+                if (upstreamWs) {
+                    upstreamWs.on("error", (err) => {
+                        console.error("[ProxyWS] Upstream WS error:", err)
+                        cleanup()
+                    })
+                }
+            })
+        } catch (error) {
+            console.error("[ProxyWS] Error:", error)
+            socket.write("HTTP/1.1 500 Internal Server Error\r\n\r\n")
+            socket.destroy()
         }
-        // Otherwise, let other upgrade handlers process it (terminal, file-ops)
     })
 
     httpServer.listen(VM_ORCHESTRATOR_PORT, () => {
